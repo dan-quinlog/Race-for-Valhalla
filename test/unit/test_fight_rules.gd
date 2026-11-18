@@ -200,22 +200,43 @@ func test_super_windup_log_calls_for_trip() -> void:
 	assert_signal_emitted_with_parameters(rules, "logged", ["SUPER! Foe winds up Wrath (left, center, right), off the beat. Trip it!"])
 
 
-func test_default_pattern_lands_on_grid_except_super() -> void:
+## Plays the default enemy until `count` hits land, optionally Tripping each
+## super once while it winds up. Returns each hit as "<move>:<beat parity>".
+func _play(count: int, trip_supers: bool) -> Array[String]:
 	rules = FightRules.new(1)
 	_hero().hp = 100000
 	_hero().max_hp = 100000
-	var hits: Dictionary = {}
-	for beat: int in 120:
-		var hit: int = rules.enemy.hit_beat
-		var move: EnemyMove = rules.enemy.current
+	_hero().room = 1
+	var out: Array[String] = []
+	var tripped: bool = false
+	var beat: int = 0
+	while out.size() < count and beat < 500:
+		var e: Enemy = rules.enemy
+		if trip_supers and e.is_winding() and e.current.is_super and not tripped:
+			rules.act(0, _attack(Rune.Dir.DOWN, beat))
+			tripped = true
+		var hit: int = e.hit_beat
+		var move: EnemyMove = e.current
 		rules.close_beat(beat)
 		if move != null and hit == beat:
-			hits[move.display_name] = posmod(beat, Enemy.CADENCE)
-	assert_eq(hits.size(), 4, "every move landed at least once")
-	assert_eq(hits["Grave Claw"], 0)
-	assert_eq(hits["Barrow Slam"], 0)
-	assert_eq(hits["Death Howl"], 0)
-	assert_eq(hits["Grave Wrath"], 1, "the super lands off the beat")
+			out.append("%s:%d" % [move.display_name, posmod(beat, Enemy.CADENCE)])
+			tripped = false
+		beat += 1
+	return out
+
+
+func test_untripped_super_shifts_the_enemy_off_beat() -> void:
+	assert_eq(_play(10, false), [
+		"Grave Claw:0", "Barrow Slam:0", "Death Howl:0", "Grave Claw:0", "Grave Wrath:1",
+		"Grave Claw:1", "Barrow Slam:1", "Death Howl:1", "Grave Claw:1", "Grave Wrath:0",
+	])
+
+
+func test_tripping_supers_keeps_the_enemy_on_beat() -> void:
+	assert_eq(_play(10, true), [
+		"Grave Claw:0", "Barrow Slam:0", "Death Howl:0", "Grave Claw:0", "Grave Wrath:0",
+		"Grave Claw:0", "Barrow Slam:0", "Death Howl:0", "Grave Claw:0", "Grave Wrath:0",
+	])
 
 
 func test_default_enemy_pattern() -> void:

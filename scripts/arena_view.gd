@@ -76,6 +76,8 @@ func _draw() -> void:
 		var label: String = enemy.display_name
 		if enemy.is_winding():
 			label += ": " + ("SUPER " if enemy.current.is_super else "") + enemy.current.display_name
+		elif enemy.is_rhythm_off_beat():
+			label += " (off the beat)"
 		_text_centered(font, label, er, body.position.y + body.size.y + 16.0, 14, TEXT_COLOR)
 
 	for hero: Hero in rules.heroes:

@@ -5,12 +5,15 @@ extends Combatant
 ## When a move starts, its target rooms are locked in and its hit lands
 ## `windup` beats later. After the hit the enemy rests, then starts the next
 ## move. A stagger pushes the pending hit (or the next wind-up) back one beat.
-## Moves only start on the CADENCE grid (even beats), so moves with even
-## wind-ups land on the grid and an odd-count super lands off it.
+##
+## The enemy keeps a 2-beat rhythm (CADENCE). Each wind-up starts in step with
+## where its last hit landed (`phase`), so even wind-ups keep that rhythm. An
+## odd-count super shifts it by one beat, and the enemy stays off the beat
+## until a Trip (or the next super) shifts it back.
 ## Everything is on beat indices.
 
 const NONE: int = -(1 << 62)
-## Beats per step of the enemy's rhythm. Wind-ups start on multiples of this.
+## Beats per step of the enemy's rhythm.
 const CADENCE: int = 2
 
 var pattern: Array[EnemyMove] = []
@@ -22,6 +25,8 @@ var targets: Array[int] = []
 var hit_beat: int = NONE
 ## First beat a new wind-up may start on.
 var next_start: int = 0
+## Beat parity the enemy's rhythm is on: 0 is on the beat, 1 is off it.
+var phase: int = 0
 
 var _pattern_index: int = 0
 var _hero_cursor: int = 0
@@ -32,15 +37,21 @@ func _init(p_name: String, p_max_hp: int, p_room: int, p_pattern: Array[EnemyMov
 	assert(not p_pattern.is_empty(), "an enemy needs at least one move")
 	pattern = p_pattern
 	next_start = first_start
+	phase = posmod(first_start, CADENCE)
 
 
 func is_winding() -> bool:
 	return current != null
 
 
-## True while the current move will land off the 2-beat grid.
+## True while the current move will land off the beat (on an odd beat).
 func is_off_beat() -> bool:
 	return is_winding() and posmod(hit_beat, CADENCE) != 0
+
+
+## True while the enemy's rhythm is shifted off the beat.
+func is_rhythm_off_beat() -> bool:
+	return phase != 0
 
 
 ## Beats left until the current move lands, counted from the last closed beat.
@@ -48,10 +59,10 @@ func countdown(closed_beat: int) -> int:
 	return hit_beat - closed_beat if is_winding() else 0
 
 
-## Starts the next move if resting is over and the beat is on the grid.
-## Returns true if one started.
+## Starts the next move if resting is over and the beat is in step with the
+## enemy's rhythm. Returns true if one started.
 func try_start(beat: int, room_count: int, heroes: Array[Hero]) -> bool:
-	if is_winding() or beat < next_start or not is_alive() or posmod(beat, CADENCE) != 0:
+	if is_winding() or beat < next_start or not is_alive() or posmod(beat - phase, CADENCE) != 0:
 		return false
 	current = pattern[_pattern_index]
 	_pattern_index = (_pattern_index + 1) % pattern.size()
@@ -61,7 +72,9 @@ func try_start(beat: int, room_count: int, heroes: Array[Hero]) -> bool:
 
 
 ## Ends the current move after it lands and schedules the next wind-up.
+## The enemy's rhythm follows where this hit landed.
 func finish(beat: int) -> void:
+	phase = posmod(beat, CADENCE)
 	next_start = beat + (current.rest if current != null else 0) + 1
 	current = null
 	targets = []
