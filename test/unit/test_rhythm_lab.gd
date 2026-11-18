@@ -11,63 +11,67 @@ func before_each() -> void:
 	await wait_process_frames(2)
 
 
-func _period() -> float:
-	return lab.judge.period
+func _press(action: StringName) -> void:
+	var ev := InputEventAction.new()
+	ev.action = action
+	ev.pressed = true
+	lab._unhandled_input(ev)
 
 
-func test_starts_with_clean_state() -> void:
-	assert_eq(lab.combo.combo, 0)
-	assert_eq(lab.history.size(), 0)
-	assert_eq(lab.get_node("%JudgmentLabel").text, "Press on the beat")
+func _presses(panel: PlayerPanel) -> int:
+	var c: ComboTracker = panel.rhythm.combo
+	return c.perfects + c.goods + c.misses
 
 
-func test_on_beat_rune_is_perfect_and_logged() -> void:
-	var j: BeatJudge.Judgment = lab.submit_rune(0, _period() * 3)
-	assert_eq(j.grade, BeatJudge.Grade.PERFECT)
-	assert_eq(lab.history, ["Fehu"])
-	assert_string_starts_with(lab.get_node("%JudgmentLabel").text, "PERFECT")
-	assert_eq(lab.get_node("%ComboLabel").text, "Combo 1   (best 1)")
+func test_starts_solo_with_p2_hidden() -> void:
+	assert_false(lab.two_players)
+	assert_false(lab.panels[1].visible)
+	assert_string_contains(lab.panels[0].get_node("%RunePad").get_node("%Up").text, "W / ↑")
 
 
-func test_offbeat_rune_breaks_combo_without_logging() -> void:
-	lab.submit_rune(0, _period() * 3)
-	lab.submit_rune(1, _period() * 4)
-	lab.submit_rune(2, _period() * 4.5)
-	assert_eq(lab.combo.combo, 0)
-	assert_eq(lab.combo.best, 2)
-	assert_eq(lab.history, ["Fehu", "Uruz"])
-	assert_string_starts_with(lab.get_node("%JudgmentLabel").text, "MISS")
+func test_solo_routes_both_key_sets_to_p1() -> void:
+	_press(&"p1_left")
+	_press(&"p2_left")
+	assert_eq(_presses(lab.panels[0]), 2)
+	assert_eq(_presses(lab.panels[1]), 0)
 
 
-func test_rune_buttons_submit_runes() -> void:
-	lab.get_node("%Rune3").button_down.emit()
-	assert_eq(lab.combo.perfects + lab.combo.goods + lab.combo.misses, 1)
+func test_two_players_route_separately() -> void:
+	lab.set_two_players(true)
+	assert_true(lab.panels[1].visible)
+	_press(&"p1_down")
+	_press(&"p2_up")
+	assert_eq(_presses(lab.panels[0]), 1)
+	assert_eq(_presses(lab.panels[1]), 1)
+	assert_eq(lab.get_node("%TwoPlayers").button_pressed, true)
 
 
-func test_history_is_capped() -> void:
-	for i: int in 12:
-		lab.submit_rune(i % 4, _period() * (i + 1))
-	assert_eq(lab.history.size(), lab.HISTORY_LENGTH)
+func test_players_judge_the_same_beat_independently() -> void:
+	lab.set_two_players(true)
+	var period: float = lab.panels[0].rhythm.judge.period
+	assert_eq(lab.panels[0].submit(Rune.Dir.LEFT, period * 3).judgment.grade, BeatJudge.Grade.PERFECT)
+	assert_eq(lab.panels[1].submit(Rune.Dir.LEFT, period * 3).judgment.grade, BeatJudge.Grade.PERFECT)
 
 
-func test_bpm_change_restarts_with_new_period() -> void:
-	lab.submit_rune(0, _period())
+func test_bpm_change_reconfigures_players() -> void:
+	lab.panels[0].submit(Rune.Dir.DOWN, lab.panels[0].rhythm.judge.period)
 	lab.get_node("%Bpm").value = 120.0
-	assert_almost_eq(lab.judge.period, 0.5, 0.001)
-	assert_eq(lab.combo.combo, 0)
+	assert_almost_eq(lab.panels[0].rhythm.judge.period, 0.5, 0.001)
+	assert_almost_eq(lab.panels[1].rhythm.judge.period, 0.5, 0.001)
+	assert_eq(lab.panels[0].rhythm.reader.pending, CommandReader.NO_RUNE)
 
 
 func test_window_is_clamped_below_half_period() -> void:
 	lab.get_node("%Bpm").value = 160.0
 	lab.get_node("%WindowMs").value = 250.0
-	assert_lt(lab.judge.window * 2.0, lab.judge.period)
+	var judge: BeatJudge = lab.panels[0].rhythm.judge
+	assert_lt(judge.window * 2.0, judge.period)
 
 
-func test_describe_reports_early_and_late() -> void:
-	var early := BeatJudge.Judgment.new(BeatJudge.Grade.GOOD, 1, -0.08)
-	assert_eq(lab.describe(early), "GOOD  (-80 ms early)")
-	var dup := BeatJudge.Judgment.new(BeatJudge.Grade.MISS, 1, 0.0, true)
-	assert_eq(lab.describe(dup), "MISS: one rune per beat")
+func test_beats_expire_pending_commands() -> void:
+	lab.panels[0].submit(Rune.Dir.RIGHT, lab.panels[0].rhythm.judge.period)
+	lab._on_beat(3)
+	assert_eq(lab.panels[0].rhythm.reader.pending, CommandReader.NO_RUNE)
 
 
 func test_ekg_wave_peaks_on_buh() -> void:

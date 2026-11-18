@@ -46,8 +46,9 @@ func set_time(t: float) -> void:
 	queue_redraw()
 
 
-func add_marker(t: float, grade: BeatJudge.Grade) -> void:
-	_markers.append({"time": t, "grade": grade})
+## lane 0 draws below the trace (player 1), lane 1 above it (player 2).
+func add_marker(t: float, grade: BeatJudge.Grade, lane: int = 0) -> void:
+	_markers.append({"time": t, "grade": grade, "lane": lane})
 	queue_redraw()
 
 
@@ -100,8 +101,9 @@ func _draw() -> void:
 	for m: Dictionary in _markers:
 		var mx: float = cx + (float(m.time) - now) * px
 		var col: Color = GRADE_COLORS[m.grade]
+		var tip: float = baseline + 18.0 if int(m.lane) == 0 else baseline - amp - 14.0
 		draw_line(Vector2(mx, baseline - amp - 6.0), Vector2(mx, baseline + 18.0), col, 2.0)
-		draw_circle(Vector2(mx, baseline + 18.0), 5.0, col)
+		draw_circle(Vector2(mx, tip), 5.0, col)
 
 	_draw_heart(Vector2(cx, h * 0.14), minf(h, w) * 0.07 * _pulse())
 
