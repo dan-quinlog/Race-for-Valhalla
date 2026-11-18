@@ -176,8 +176,53 @@ func test_one_fallen_hero_does_not_end_coop() -> void:
 	assert_false(rules.over)
 
 
+func test_tripping_super_puts_it_back_on_the_beat() -> void:
+	var pattern: Array[EnemyMove] = [EnemyMove.new("Wrath", EnemyMove.Target.ALL_ROOMS, 5, 20, 3, true)]
+	rules = FightRules.new(1, Enemy.new("Foe", 100, 1, pattern, 0))
+	_hero().room = 1
+	rules.close_beat(0)
+	assert_true(rules.enemy.is_off_beat())
+	assert_eq(rules.enemy.hit_beat, 5)
+	var text: String = rules.act(0, _attack(Rune.Dir.DOWN, 2))
+	assert_string_contains(text, "back onto the beat")
+	assert_eq(rules.enemy.hit_beat, 6)
+	rules.close_beat(5)
+	assert_eq(_hero().hp, FightRules.HERO_HP)
+	rules.close_beat(6)
+	assert_eq(_hero().hp, FightRules.HERO_HP - 20)
+
+
+func test_super_windup_log_calls_for_trip() -> void:
+	var pattern: Array[EnemyMove] = [EnemyMove.new("Wrath", EnemyMove.Target.ALL_ROOMS, 5, 20, 3, true)]
+	rules = FightRules.new(1, Enemy.new("Foe", 100, 1, pattern, 0))
+	watch_signals(rules)
+	rules.close_beat(0)
+	assert_signal_emitted_with_parameters(rules, "logged", ["SUPER! Foe winds up Wrath (left, center, right), off the beat. Trip it!"])
+
+
+func test_default_pattern_lands_on_grid_except_super() -> void:
+	rules = FightRules.new(1)
+	_hero().hp = 100000
+	_hero().max_hp = 100000
+	var hits: Dictionary = {}
+	for beat: int in 120:
+		var hit: int = rules.enemy.hit_beat
+		var move: EnemyMove = rules.enemy.current
+		rules.close_beat(beat)
+		if move != null and hit == beat:
+			hits[move.display_name] = posmod(beat, Enemy.CADENCE)
+	assert_eq(hits.size(), 4, "every move landed at least once")
+	assert_eq(hits["Grave Claw"], 0)
+	assert_eq(hits["Barrow Slam"], 0)
+	assert_eq(hits["Death Howl"], 0)
+	assert_eq(hits["Grave Wrath"], 1, "the super lands off the beat")
+
+
 func test_default_enemy_pattern() -> void:
 	var e: Enemy = FightRules.default_enemy()
-	assert_eq(e.pattern.size(), 4)
+	assert_eq(e.pattern.size(), 5)
+	var supers: Array = e.pattern.filter(func(m: EnemyMove) -> bool: return m.is_super)
+	assert_eq(supers.size(), 1)
+	assert_eq(supers[0].windup % 2, 1)
 	assert_eq(e.next_start, FightRules.FIRST_ENEMY_BEAT)
 	assert_eq(e.hp, FightRules.ENEMY_HP)

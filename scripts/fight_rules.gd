@@ -43,10 +43,13 @@ func _init(player_count: int = 1, p_enemy: Enemy = null) -> void:
 
 
 static func default_enemy() -> Enemy:
-	var claw := EnemyMove.new("Grave Claw", EnemyMove.Target.HERO_ROOM, 3, 12, 2)
-	var slam := EnemyMove.new("Barrow Slam", EnemyMove.Target.OWN_ROOM, 3, 18, 2)
+	var claw := EnemyMove.new("Grave Claw", EnemyMove.Target.HERO_ROOM, 4, 12, 1)
+	var slam := EnemyMove.new("Barrow Slam", EnemyMove.Target.OWN_ROOM, 4, 18, 1)
 	var howl := EnemyMove.new("Death Howl", EnemyMove.Target.ALL_ROOMS, 4, 8, 3)
-	var pattern: Array[EnemyMove] = [claw, slam, claw, howl]
+	# The super winds up 5 beats, landing off the 2-beat grid. One Trip
+	# puts it back on the beat.
+	var wrath := EnemyMove.new("Grave Wrath", EnemyMove.Target.ALL_ROOMS, 5, 24, 3, true)
+	var pattern: Array[EnemyMove] = [claw, slam, howl, claw, wrath]
 	return Enemy.new("Draugr", ENEMY_HP, ENEMY_ROOM, pattern, FIRST_ENEMY_BEAT)
 
 
@@ -120,8 +123,11 @@ func _attack(hero: Hero, action: RuneAction) -> String:
 	var extra: String = ""
 	match action.attack:
 		RuneAction.Attack.TRIP:
+			var was_off_beat: bool = enemy.is_off_beat()
 			enemy.stagger()
 			extra = ", staggered"
+			if was_off_beat and not enemy.is_off_beat():
+				extra += " back onto the beat"
 		RuneAction.Attack.DEFENSIVE:
 			hero.guarded = true
 			extra = ", guarding"
@@ -147,7 +153,12 @@ func _resolve(beat: int) -> void:
 		var rooms: Array[String] = []
 		for r: int in enemy.targets:
 			rooms.append(room_name(r))
-		logged.emit("%s winds up %s (%s)" % [enemy.display_name, enemy.current.display_name, ", ".join(rooms)])
+		var text: String = "%s winds up %s (%s)" % [enemy.display_name, enemy.current.display_name, ", ".join(rooms)]
+		if enemy.current.is_super:
+			text = "SUPER! " + text
+		if enemy.is_off_beat():
+			text += ", off the beat. Trip it!"
+		logged.emit(text)
 
 
 func _hit(hero: Hero, move: EnemyMove, beat: int) -> void:

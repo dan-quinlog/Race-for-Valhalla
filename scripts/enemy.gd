@@ -5,9 +5,13 @@ extends Combatant
 ## When a move starts, its target rooms are locked in and its hit lands
 ## `windup` beats later. After the hit the enemy rests, then starts the next
 ## move. A stagger pushes the pending hit (or the next wind-up) back one beat.
+## Moves only start on the CADENCE grid (even beats), so moves with even
+## wind-ups land on the grid and an odd-count super lands off it.
 ## Everything is on beat indices.
 
 const NONE: int = -(1 << 62)
+## Beats per step of the enemy's rhythm. Wind-ups start on multiples of this.
+const CADENCE: int = 2
 
 var pattern: Array[EnemyMove] = []
 ## The move winding up, or null while resting.
@@ -34,14 +38,20 @@ func is_winding() -> bool:
 	return current != null
 
 
+## True while the current move will land off the 2-beat grid.
+func is_off_beat() -> bool:
+	return is_winding() and posmod(hit_beat, CADENCE) != 0
+
+
 ## Beats left until the current move lands, counted from the last closed beat.
 func countdown(closed_beat: int) -> int:
 	return hit_beat - closed_beat if is_winding() else 0
 
 
-## Starts the next move if resting is over. Returns true if one started.
+## Starts the next move if resting is over and the beat is on the grid.
+## Returns true if one started.
 func try_start(beat: int, room_count: int, heroes: Array[Hero]) -> bool:
-	if is_winding() or beat < next_start or not is_alive():
+	if is_winding() or beat < next_start or not is_alive() or posmod(beat, CADENCE) != 0:
 		return false
 	current = pattern[_pattern_index]
 	_pattern_index = (_pattern_index + 1) % pattern.size()

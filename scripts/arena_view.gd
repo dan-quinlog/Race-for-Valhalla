@@ -10,6 +10,8 @@ const ROOM_FILL := Color(1, 1, 1, 0.03)
 const TARGET_FILL := Color(0.9, 0.15, 0.1, 0.18)
 const TARGET_HOT := Color(1.0, 0.2, 0.1, 0.45)
 const ENEMY_COLOR := Color(0.45, 0.55, 0.5)
+const SUPER_COLOR := Color(0.75, 0.35, 0.95)
+const SUPER_FILL := Color(0.6, 0.2, 0.9, 0.25)
 const HERO_COLORS: Array[Color] = [Color(0.45, 0.7, 1.0), Color(1.0, 0.65, 0.3)]
 const DEAD_COLOR := Color(0.35, 0.35, 0.35)
 const HP_BACK := Color(0.15, 0.05, 0.05)
@@ -57,19 +59,23 @@ func _draw() -> void:
 		var r: Rect2 = room_rect(i)
 		draw_rect(r, ROOM_FILL)
 		if enemy.is_winding() and i in enemy.targets:
-			draw_rect(r, TARGET_HOT if countdown <= 1 else TARGET_FILL)
+			var fill: Color = SUPER_FILL if enemy.current.is_super else TARGET_FILL
+			draw_rect(r, TARGET_HOT if countdown <= 1 else fill)
 			_text(font, str(countdown), Vector2(r.position.x + 10.0, r.position.y + 40.0), 36, TARGET_HOT.lightened(0.5))
+			if enemy.is_off_beat():
+				_text(font, "OFF-BEAT", Vector2(r.position.x + 10.0, r.position.y + 58.0), 13, SUPER_COLOR.lightened(0.3))
 		draw_rect(r, ROOM_COLOR, false, 2.0)
 		_text_centered(font, FightRules.room_name(i).to_upper(), r, r.position.y + r.size.y - 8.0, 12, ROOM_COLOR)
 
 	if enemy.is_alive():
 		var er: Rect2 = room_rect(enemy.room)
 		var body := Rect2(er.position + Vector2(er.size.x * 0.3, er.size.y * 0.12), Vector2(er.size.x * 0.4, er.size.y * 0.42))
-		draw_rect(body, ENEMY_COLOR)
+		var super_up: bool = enemy.is_winding() and enemy.current.is_super
+		draw_rect(body, SUPER_COLOR if super_up else ENEMY_COLOR)
 		_hp_bar(Rect2(body.position.x, body.position.y - 12.0, body.size.x, 6.0), enemy)
 		var label: String = enemy.display_name
 		if enemy.is_winding():
-			label += ": " + enemy.current.display_name
+			label += ": " + ("SUPER " if enemy.current.is_super else "") + enemy.current.display_name
 		_text_centered(font, label, er, body.position.y + body.size.y + 16.0, 14, TEXT_COLOR)
 
 	for hero: Hero in rules.heroes:
