@@ -1,0 +1,56 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/rune_pad.gd" id="1_pad"]
+
+[node name="RunePad" type="GridContainer"]
+theme_override_constants/h_separation = 4
+theme_override_constants/v_separation = 4
+columns = 3
+script = ExtResource("1_pad")
+
+[node name="SpacerTL" type="Control" parent="."]
+layout_mode = 2
+
+[node name="Up" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 78)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 13
+
+[node name="SpacerTR" type="Control" parent="."]
+layout_mode = 2
+
+[node name="Left" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 78)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 13
+
+[node name="Center" type="Label" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 78)
+layout_mode = 2
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Right" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 78)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 13
+
+[node name="SpacerBL" type="Control" parent="."]
+layout_mode = 2
+
+[node name="Down" type="Button" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(104, 78)
+layout_mode = 2
+focus_mode = 0
+theme_override_font_sizes/font_size = 13
+
+[node name="SpacerBR" type="Control" parent="."]
+layout_mode = 2
