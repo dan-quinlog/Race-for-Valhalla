@@ -1,5 +1,7 @@
 extends Control
-## First fight: one or two heroes against one enemy on a strip of three rooms.
+## A scrolling stage: one or two heroes fight through encounters and past
+## hazards on a 3-lane grid to reach the exit door. The layout is stitched
+## from StageChunk resources (`chunks`).
 ## Input routing matches the Rhythm Lab: P1 is WASD and gamepad 1, P2 the
 ## arrow keys and gamepad 2, and solo mode sends every input set to P1.
 
@@ -8,20 +10,26 @@ const WINDOW: float = 0.15
 const PERFECT_WINDOW: float = 0.04
 const LOG_LENGTH: int = 6
 const LAB_SCENE: String = "res://scenes/rhythm_lab.tscn"
+const FIRST_STAGE: Array[StageChunk] = [
+	preload("res://stages/chunks/start.tres"),
+	preload("res://stages/chunks/ambush.tres"),
+	preload("res://stages/chunks/fire_gate.tres"),
+]
 
 const KEY_HINTS_P1: Array[String] = ["W", "S", "A", "D"]
 const KEY_HINTS_P2: Array[String] = ["↑", "↓", "←", "→"]
 const KEY_HINTS_SOLO: Array[String] = ["W / ↑", "S / ↓", "A / ←", "D / →"]
 
 var two_players: bool = false
-var rules: FightRules
+var chunks: Array[StageChunk] = FIRST_STAGE
+var rules: StageRules
 var log_lines: Array[String] = []
 
 @onready var _clock: BeatClock = %BeatClock
 @onready var _ekg: EkgDisplay = %Ekg
-@onready var _arena: ArenaView = %Arena
+@onready var _view: StageView = %StageView
 @onready var _banner: Label = %Banner
-@onready var _fight_log: Label = %FightLog
+@onready var _stage_log: Label = %StageLog
 @onready var _two_players_toggle: CheckButton = %TwoPlayers
 @onready var panels: Array[PlayerPanel] = [%Player1, %Player2]
 
@@ -47,13 +55,14 @@ func restart() -> void:
 	for p: PlayerPanel in panels:
 		p.configure(_clock.period, WINDOW, PERFECT_WINDOW)
 	_ekg.configure(_clock.period, WINDOW, WINDOW, PERFECT_WINDOW)
-	rules = FightRules.new(2 if two_players else 1)
+	rules = StageRules.new(StageMap.build(chunks), 2 if two_players else 1)
 	rules.logged.connect(_on_logged)
 	rules.ended.connect(_on_ended)
-	_arena.rules = rules
+	rules.door_opened.connect(_on_door_opened)
+	_view.rules = rules
 	log_lines.clear()
-	_fight_log.text = ""
-	_banner.text = "Slay the %s! Move into its room to strike." % rules.enemy.display_name
+	_stage_log.text = ""
+	_banner.text = "Fight your way to the exit door!"
 
 
 func set_two_players(on: bool) -> void:
@@ -114,11 +123,15 @@ func _on_logged(text: String) -> void:
 	log_lines.push_front(text)
 	if log_lines.size() > LOG_LENGTH:
 		log_lines.pop_back()
-	_fight_log.text = "\n".join(log_lines)
+	_stage_log.text = "\n".join(log_lines)
+
+
+func _on_door_opened() -> void:
+	_banner.text = "The exit door is open! Everyone to the door."
 
 
 func _on_ended(won: bool) -> void:
 	if won:
-		_banner.text = "Victory! The %s falls. Glory awaits." % rules.enemy.display_name
+		_banner.text = "Stage clear! Glory awaits beyond the door."
 	else:
 		_banner.text = "You have fallen. Press Restart to fight again."

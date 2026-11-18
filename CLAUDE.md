@@ -9,8 +9,9 @@ A roguelike rhythm game. Viking warriors act on the beat of their own heart, cha
 
 ## Layout
 - `scenes/`, `scripts/` (one script per scene, plus `class_name` helper classes), `test/unit/`.
-- `scenes/fight.tscn` is the main scene: the first fight (one or two heroes against a Draugr on a 3-room strip), drawn by `ArenaView`. It has a button to the Rhythm Lab.
+- `scenes/stage.tscn` is the main scene: a scrolling stage (one or two heroes) drawn by `StageView`. It has a button to the Rhythm Lab.
 - `scenes/rhythm_lab.tscn` is the test bench for the heartbeat and rune commands, with tunable BPM, windows and latency. Both scenes hold one or two `player_panel.tscn` (each with a `rune_pad.tscn`).
+- `stages/chunks/*.tres` are `StageChunk` resources: three lane strings (`.` open, `#` wall, `F` fire, `D` door, `1`/`2` starts, `B` brute, `R` ranger) plus an `encounter` flag. `StageMap.build` stitches chunks left to right. Stages are hand-listed for now (`stage.gd` `FIRST_STAGE`), but are meant to be generated from shuffled chunks later.
 
 ## Core rhythm model
 - `BeatClock` (`scripts/beat_clock.gd`) is the master clock. It is locked to audio playback of a looping, synthesized heartbeat (`HeartbeatAudio`), not to frame time. The buh of beat `n` is at `n * period`.
@@ -29,13 +30,19 @@ A roguelike rhythm game. Viking warriors act on the beat of their own heart, cha
 - `PlayerRhythm` gives each player their own judge, combo and reader. All players share one `BeatClock`.
 - Input actions are `p1_up/down/left/right` (WASD, gamepad 0) and `p2_*` (arrow keys, gamepad 1). Each direction maps to both the d-pad and the matching face button. In solo mode, every input set drives P1. Mobile is solo with on-screen `RunePad` touch buttons.
 
-## Fights
-- `FightRules` is pure logic on beat indices: `Hero`s and one `Enemy` (both `Combatant`) on a strip of `ROOM_COUNT` rooms. Hero actions resolve as they complete (`act`). Enemy steps resolve in `close_beat`, which the scene calls on `beat_closed`, so a brace or dodge entered on the hit beat counts. `act` closes earlier beats first.
-- The enemy loops through `EnemyMove`s. Each move locks its target rooms when the wind-up starts, then lands `windup` beats later and rests for `rest` beats.
-- The enemy keeps a 2-beat rhythm (`Enemy.CADENCE`). Each wind-up starts in step with where its last hit landed (`Enemy.phase`). Regular moves wind up an even number of beats, so they keep the rhythm. A super (`EnemyMove.is_super`) winds up an odd count, so it lands off the beat. The enemy then stays off the beat, breaking the players' 2-beat flow, until a Trip shifts a move by one beat (or the next super shifts it back). Bracing can outlast one off-beat hit, but the timing conflict remains. Trip always shifts the move a beat, even when that knocks an on-beat enemy off the players' beat. That is intended (confirmed by the user). The arena tints super targets purple and marks off-beat targets OFF-BEAT.
-- Attacks need the same room. Standard 10. Heavy 20, but the hero is exposed (takes +50%) until their next command. Trip 4 and staggers (the wind-up slips 1 beat). Defensive 6 and halves the next hit. Perfect and blessed each add +50%.
-- A brace covers the beat it completes on and the next one. A blessed brace strikes back for 10. A warded (blessed) move ignores room damage for the same two beats. Brace direction doesn't matter yet; it will once attacks come from adjacent rooms.
-- Numbers are placeholders in `FightRules` constants.
+## Stages and fights
+- `StageRules` is pure logic on beat indices: `Hero`s and `Enemy`s (both `Combatant`) on a grid of 3 lanes by `map.width` columns. Cells are `Vector2i(column, lane)`, and lane 0 is the back (top) lane. Movement: up/down change lanes, left/right change columns.
+- Hero actions resolve as they complete (`act`). Enemies and fire resolve in `close_beat`, which the scene calls on `beat_closed`, so a brace or dodge entered on the hit beat counts. `act` closes earlier beats first.
+- **Camera:** shows `VIEW_COLS` (4) columns and only scrolls right. It follows the lead hero once they pass `LEAD_COLS` into view, but never past the trailing living hero. It stops at the next uncleared encounter (an encounter chunk filling the screen) until that area's enemies are dead, then catches up and scrolling resumes. Heroes can't leave the screen. Only on-screen enemies act.
+- **Exit:** once every encounter is cleared, the door opens, and the stage is won when every living hero stands on it. Later the door will lead to another stage or the boss.
+- **One enemy per zone.** Heroes can share zones with anything. Melee attacks hit the enemy in your zone.
+- **Enemy base:** `Enemy` takes 2-beat steps (`CADENCE`). Each step, `decide()` either repositions (returns null) or returns an `EnemyMove` to wind up. The move's target zones lock in at the wind-up start, and it lands `windup` beats later. Each step starts in step with where the last hit landed (`phase`). Regular moves wind up an even number of beats. A super (`is_super`) winds up an odd count, lands off the beat, and leaves the enemy off the beat until a Trip shifts a move by one beat (or the next super shifts it back). Trip always shifts the move, even when that knocks an on-beat enemy off the players' beat (confirmed by the user).
+  - `RangerEnemy` (Archer) holds its column. If a hero is in its lane to the left, it nocks an arrow (2 beats) that hits the first hero in line. Otherwise it shifts one lane toward the nearest hero.
+  - `BruteEnemy` (Draugr) alternates moving one zone toward the nearest hero and smashing its own zone (2-beat wind-up).
+  - `PatternEnemy` loops a fixed move list. `PatternEnemy.draugr()` is the first fight's Draugr with the off-beat Grave Wrath super, kept for bosses.
+- **Braces face a direction:** they stop hits in the zone (`from_dir` none) and hits coming from the braced side (an arrow needs a brace facing right). A brace covers its beat and the next. A blessed brace strikes back for 10. A warded (blessed) move ignores enemy hits and fire for the same two beats.
+- **Fire** (`FireTrap`) burns a column on a 4-off / 2-on beat cycle. A ward stops it, but a brace does not.
+- **Attacks:** Standard 10. Heavy 20, but the hero is exposed (takes +50%) until their next command. Trip 4 and staggers. Defensive 6 and halves the next hit. Perfect and blessed each add +50%. Numbers are placeholders in `StageRules` and enemy constants.
 
 ## Tests
 The default commands from `../../CLAUDE.md` apply as written, with no overrides:

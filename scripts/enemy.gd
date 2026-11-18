@@ -1,41 +1,39 @@
 class_name Enemy
 extends Combatant
-## A foe that loops through a pattern of telegraphed moves.
+## Base for stage foes. Handles the beat rhythm. Subclasses choose what to do
+## each step in decide().
 ##
-## When a move starts, its target rooms are locked in and its hit lands
-## `windup` beats later. After the hit the enemy rests, then starts the next
-## move. A stagger pushes the pending hit (or the next wind-up) back one beat.
-##
-## The enemy keeps a 2-beat rhythm (CADENCE). Each wind-up starts in step with
-## where its last hit landed (`phase`), so even wind-ups keep that rhythm. An
-## odd-count super shifts it by one beat, and the enemy stays off the beat
-## until a Trip (or the next super) shifts it back.
+## The enemy acts in 2-beat steps (CADENCE). On a step it either repositions
+## (decide() moves it and returns null) or starts a telegraphed EnemyMove,
+## whose target zones lock in now and which lands `windup` beats later.
+## After a hit it rests, then the next step starts in step with where the
+## hit landed (`phase`). An odd-count super shifts that rhythm by one beat,
+## and the enemy stays off the beat until a Trip (or another super) shifts
+## it back. A stagger pushes the pending hit, or the next step, back a beat.
 ## Everything is on beat indices.
 
 const NONE: int = -(1 << 62)
 ## Beats per step of the enemy's rhythm.
 const CADENCE: int = 2
 
-var pattern: Array[EnemyMove] = []
-## The move winding up, or null while resting.
+## The move winding up, or null between moves.
 var current: EnemyMove
-## Rooms the current move will hit.
-var targets: Array[int] = []
+## Zones the current move will hit.
+var targets: Array[Vector2i] = []
 ## Beat the current move lands on.
 var hit_beat: int = NONE
-## First beat a new wind-up may start on.
+## First beat the next step may happen on.
 var next_start: int = 0
 ## Beat parity the enemy's rhythm is on: 0 is on the beat, 1 is off it.
 var phase: int = 0
+## Index into the stage's encounters, or -1.
+var encounter: int = -1
 
-var _pattern_index: int = 0
 var _hero_cursor: int = 0
 
 
-func _init(p_name: String, p_max_hp: int, p_room: int, p_pattern: Array[EnemyMove], first_start: int = 0) -> void:
-	super(p_name, p_max_hp, p_room)
-	assert(not p_pattern.is_empty(), "an enemy needs at least one move")
-	pattern = p_pattern
+func _init(p_name: String, p_max_hp: int, p_cell: Vector2i, first_start: int = 0) -> void:
+	super(p_name, p_max_hp, p_cell)
 	next_start = first_start
 	phase = posmod(first_start, CADENCE)
 
@@ -59,19 +57,48 @@ func countdown(closed_beat: int) -> int:
 	return hit_beat - closed_beat if is_winding() else 0
 
 
-## Starts the next move if resting is over and the beat is in step with the
-## enemy's rhythm. Returns true if one started.
-func try_start(beat: int, room_count: int, heroes: Array[Hero]) -> bool:
+## Takes a step if one is due on `beat`. Returns true if it acted.
+func try_act(beat: int, stage: StageRules) -> bool:
 	if is_winding() or beat < next_start or not is_alive() or posmod(beat - phase, CADENCE) != 0:
 		return false
-	current = pattern[_pattern_index]
-	_pattern_index = (_pattern_index + 1) % pattern.size()
-	hit_beat = beat + current.windup
-	targets = _pick_targets(current.target, room_count, heroes)
+	var move: EnemyMove = decide(beat, stage)
+	if move == null:
+		next_start = beat + CADENCE
+		return true
+	current = move
+	hit_beat = beat + move.windup
+	targets = aim(move, stage)
 	return true
 
 
-## Ends the current move after it lands and schedules the next wind-up.
+## Chooses this step. Return a move to wind it up, or null after
+## repositioning (or idling).
+func decide(_beat: int, _stage: StageRules) -> EnemyMove:
+	return null
+
+
+## Zones a move will hit, locked in when its wind-up starts.
+func aim(move: EnemyMove, stage: StageRules) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	match move.target:
+		EnemyMove.Target.OWN_ZONE:
+			out.append(cell)
+		EnemyMove.Target.ALL_ZONES:
+			out = stage.visible_cells()
+		EnemyMove.Target.LANE_LEFT:
+			for col: int in range(stage.camera_col, cell.x):
+				out.append(Vector2i(col, cell.y))
+		EnemyMove.Target.HERO_ZONE:
+			var living: Array[Hero] = stage.living_heroes()
+			if living.is_empty():
+				out.append(cell)
+			else:
+				out.append(living[_hero_cursor % living.size()].cell)
+				_hero_cursor += 1
+	return out
+
+
+## Ends the current move after it lands and schedules the next step.
 ## The enemy's rhythm follows where this hit landed.
 func finish(beat: int) -> void:
 	phase = posmod(beat, CADENCE)
@@ -88,19 +115,16 @@ func stagger() -> void:
 		next_start += 1
 
 
-func _pick_targets(target: EnemyMove.Target, room_count: int, heroes: Array[Hero]) -> Array[int]:
-	var out: Array[int] = []
-	match target:
-		EnemyMove.Target.OWN_ROOM:
-			out.append(room)
-		EnemyMove.Target.ALL_ROOMS:
-			for r: int in room_count:
-				out.append(r)
-		EnemyMove.Target.HERO_ROOM:
-			var living: Array[Hero] = heroes.filter(func(h: Hero) -> bool: return h.is_alive())
-			if living.is_empty():
-				out.append(room)
-			else:
-				out.append(living[_hero_cursor % living.size()].room)
-				_hero_cursor += 1
-	return out
+## Steps one zone toward `goal`, trying the column first unless
+## `lane_first`. Only free, on-screen zones count. Returns true if it moved.
+func step_toward(goal: Vector2i, stage: StageRules, lane_first: bool = false) -> bool:
+	var across := Vector2i(signi(goal.x - cell.x), 0)
+	var along := Vector2i(0, signi(goal.y - cell.y))
+	var tries: Array[Vector2i] = [across, along]
+	if lane_first:
+		tries = [along, across]
+	for d: Vector2i in tries:
+		if d != Vector2i.ZERO and stage.enemy_can_enter(cell + d):
+			cell += d
+			return true
+	return false

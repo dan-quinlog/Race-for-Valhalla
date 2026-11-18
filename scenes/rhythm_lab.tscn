@@ -117,11 +117,11 @@ layout_mode = 2
 focus_mode = 0
 text = "Restart"
 
-[node name="FightButton" type="Button" parent="Margin/Layout/Settings"]
+[node name="StageButton" type="Button" parent="Margin/Layout/Settings"]
 unique_name_in_owner = true
 layout_mode = 2
 focus_mode = 0
-text = "Fight"
+text = "Stage"
 
 [node name="Players" type="HBoxContainer" parent="Margin/Layout"]
 layout_mode = 2

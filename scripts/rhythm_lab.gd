@@ -4,7 +4,7 @@ extends Control
 ## In single-player mode every input set drives P1. Mobile is single-player
 ## with on-screen rune pads only.
 
-const FIGHT_SCENE: String = "res://scenes/fight.tscn"
+const STAGE_SCENE: String = "res://scenes/stage.tscn"
 const KEY_HINTS_P1: Array[String] = ["W", "S", "A", "D"]
 const KEY_HINTS_P2: Array[String] = ["↑", "↓", "←", "→"]
 const KEY_HINTS_SOLO: Array[String] = ["W / ↑", "S / ↓", "A / ←", "D / →"]
@@ -29,7 +29,7 @@ func _ready() -> void:
 	for box: SpinBox in [_bpm, _window_ms, _perfect_ms, _latency_ms]:
 		box.value_changed.connect(_on_setting_changed)
 	%RestartButton.pressed.connect(restart)
-	%FightButton.pressed.connect(open_fight)
+	%StageButton.pressed.connect(open_stage)
 	_two_players_toggle.toggled.connect(set_two_players)
 	_two_players_toggle.visible = not OS.has_feature("mobile")
 	set_two_players(false)
@@ -61,8 +61,8 @@ func set_two_players(on: bool) -> void:
 		_two_players_toggle.set_pressed_no_signal(on)
 
 
-func open_fight() -> void:
-	go_to_scene(FIGHT_SCENE)
+func open_stage() -> void:
+	go_to_scene(STAGE_SCENE)
 
 
 ## Side-effect wrapper so tests can stub out scene changes.

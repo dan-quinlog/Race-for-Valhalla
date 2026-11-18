@@ -1,19 +1,19 @@
 class_name Combatant
 extends RefCounted
-## Anything with health that stands in a room.
+## Anything with health that stands in a zone.
 
 var display_name: String
 var max_hp: int
 var hp: int
-## Room index on the strip (0 = left).
-var room: int
+## Zone as Vector2i(column, lane).
+var cell: Vector2i
 
 
-func _init(p_name: String, p_max_hp: int, p_room: int) -> void:
+func _init(p_name: String, p_max_hp: int, p_cell: Vector2i) -> void:
 	display_name = p_name
 	max_hp = p_max_hp
 	hp = p_max_hp
-	room = p_room
+	cell = p_cell
 
 
 func is_alive() -> bool:
