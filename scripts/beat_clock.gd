@@ -30,6 +30,13 @@ func _ready() -> void:
 	add_child(_player)
 
 
+func _exit_tree() -> void:
+	# Silence the heartbeat when the clock leaves (scene change). At engine
+	# shutdown Godot still reports a looping stream's playback as leaked; that
+	# warning is harmless and happens even with a bare AudioStreamPlayer.
+	stop()
+
+
 func start() -> void:
 	period = HeartbeatAudio.actual_period(60.0 / bpm)
 	_player.stream = HeartbeatAudio.build_loop(period, dum_delay)
