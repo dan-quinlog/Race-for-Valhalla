@@ -192,6 +192,29 @@ func test_tripping_super_puts_it_back_on_the_beat() -> void:
 	assert_eq(_hero().hp, FightRules.HERO_HP - 20)
 
 
+## A player on an even-beat flow starts a brace, sees the hit is off the beat,
+## skips one beat, and braces onto the odd hit beat instead. Combo survives.
+func test_skipping_a_beat_resyncs_brace_with_off_beat_hit() -> void:
+	var pattern: Array[EnemyMove] = [EnemyMove.new("Wrath", EnemyMove.Target.ALL_ROOMS, 5, 20, 3, true)]
+	rules = FightRules.new(1, Enemy.new("Foe", 100, 1, pattern, 0))
+	var player := PlayerRhythm.new(0.6, 0.15, 0.04)
+	var feed := func(rune: Rune.Dir, beat: int) -> void:
+		var r: PlayerRhythm.Result = player.submit(rune, 0.6 * beat)
+		if r.action != null:
+			rules.act(0, r.action)
+	rules.close_beat(0)
+	assert_eq(rules.enemy.hit_beat, 5)
+	feed.call(Rune.Dir.RIGHT, 2)
+	rules.close_beat(2)
+	player.reader.on_beat(3)  # beat 3 passes empty: pending brace dropped
+	player.reader.on_beat(4)
+	feed.call(Rune.Dir.RIGHT, 4)
+	feed.call(Rune.Dir.LEFT, 5)
+	rules.close_beat(5)
+	assert_eq(_hero().hp, FightRules.HERO_HP, "brace completed on the off-beat hit")
+	assert_eq(player.combo.combo, 3)
+
+
 func test_super_windup_log_calls_for_trip() -> void:
 	var pattern: Array[EnemyMove] = [EnemyMove.new("Wrath", EnemyMove.Target.ALL_ROOMS, 5, 20, 3, true)]
 	rules = FightRules.new(1, Enemy.new("Foe", 100, 1, pattern, 0))

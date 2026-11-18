@@ -25,6 +25,7 @@ A roguelike rhythm game. Viking warriors act on the beat of their own heart, cha
 - Every command takes two beats (`CommandReader` -> `RuneAction`). The first rune picks the kind and the second picks the detail. The second rune must land on the next beat, or the first expires.
   - Movement + dir: move. Attack + down/left/up/right: Trip/Standard/Heavy/Defensive. Defense + dir: brace that way.
   - Prayer + rune: bless that rune's next action. Movement ignores room damage, Attack deals extra damage, Defense retaliates. Prayer + Prayer grants glory.
+- Skipping a beat (no input) clears a pending rune but keeps the combo. Only a mistimed or duplicate press breaks combo. Skipping is how a player shifts their own 2-beat flow by one beat to get back in time with an off-beat enemy. Tripping the enemy is the other way.
 - `PlayerRhythm` gives each player their own judge, combo and reader. All players share one `BeatClock`.
 - Input actions are `p1_up/down/left/right` (WASD, gamepad 0) and `p2_*` (arrow keys, gamepad 1). Each direction maps to both the d-pad and the matching face button. In solo mode, every input set drives P1. Mobile is solo with on-screen `RunePad` touch buttons.
 
