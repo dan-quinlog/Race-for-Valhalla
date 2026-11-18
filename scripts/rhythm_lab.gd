@@ -1,36 +1,36 @@
 extends Control
-## Rhythm Lab: a test bench for tuning the heartbeat feel. Press the four runes
-## on the beat. Tempo and timing windows can be changed live.
+## Rhythm Lab: a test bench for the heartbeat and rune commands.
+## P1 uses WASD, P2 the arrow keys, and gamepads 1 and 2 their own pads.
+## In single-player mode every input set drives P1. Mobile is single-player
+## with on-screen rune pads only.
 
-const RUNE_ACTIONS: Array[StringName] = [&"rune_1", &"rune_2", &"rune_3", &"rune_4"]
-## Placeholder names (the first four Elder Futhark runes). These are
-## Latin-script on purpose, since runic glyphs may be missing from the font.
-const RUNE_NAMES: Array[String] = ["Fehu", "Uruz", "Thurisaz", "Ansuz"]
-const HISTORY_LENGTH: int = 8
+const KEY_HINTS_P1: Array[String] = ["W", "S", "A", "D"]
+const KEY_HINTS_P2: Array[String] = ["↑", "↓", "←", "→"]
+const KEY_HINTS_SOLO: Array[String] = ["W / ↑", "S / ↓", "A / ←", "D / →"]
 
-var judge: BeatJudge
-var combo := ComboTracker.new()
-var history: Array[String] = []
+var two_players: bool = false
 
 @onready var _clock: BeatClock = %BeatClock
 @onready var _ekg: EkgDisplay = %Ekg
-@onready var _judgment_label: Label = %JudgmentLabel
-@onready var _combo_label: Label = %ComboLabel
-@onready var _stats_label: Label = %StatsLabel
-@onready var _history_label: Label = %HistoryLabel
 @onready var _bpm: SpinBox = %Bpm
 @onready var _window_ms: SpinBox = %WindowMs
 @onready var _perfect_ms: SpinBox = %PerfectMs
 @onready var _latency_ms: SpinBox = %LatencyMs
-@onready var _rune_buttons: Array[Button] = [%Rune1, %Rune2, %Rune3, %Rune4]
+@onready var _two_players_toggle: CheckButton = %TwoPlayers
+@onready var panels: Array[PlayerPanel] = [%Player1, %Player2]
 
 
 func _ready() -> void:
-	for i: int in _rune_buttons.size():
-		_rune_buttons[i].button_down.connect(_on_rune_pressed.bind(i))
+	for p: PlayerPanel in panels:
+		p.clock = _clock
+		p.judged.connect(_on_judged)
+	_clock.beat.connect(_on_beat)
 	for box: SpinBox in [_bpm, _window_ms, _perfect_ms, _latency_ms]:
 		box.value_changed.connect(_on_setting_changed)
 	%RestartButton.pressed.connect(restart)
+	_two_players_toggle.toggled.connect(set_two_players)
+	_two_players_toggle.visible = not OS.has_feature("mobile")
+	set_two_players(false)
 	restart()
 
 
@@ -43,47 +43,25 @@ func restart() -> void:
 	_clock.dum_delay = window
 	_clock.input_latency = _latency_ms.value / 1000.0
 	_clock.start()
-	judge = BeatJudge.new(_clock.period, window, perfect)
-	combo.reset()
-	history.clear()
+	for p: PlayerPanel in panels:
+		p.configure(_clock.period, window, perfect)
 	_ekg.configure(_clock.period, window, window, perfect)
-	_judgment_label.text = "Press on the beat"
-	_refresh_labels()
 	for box: SpinBox in [_bpm, _window_ms, _perfect_ms, _latency_ms]:
 		box.get_line_edit().release_focus()
 
 
-func submit_rune(rune: int, t: float) -> BeatJudge.Judgment:
-	var j: BeatJudge.Judgment = judge.judge(t)
-	combo.record(j.grade)
-	_ekg.add_marker(t, j.grade)
-	if j.grade != BeatJudge.Grade.MISS:
-		history.append(RUNE_NAMES[rune])
-		if history.size() > HISTORY_LENGTH:
-			history.pop_front()
-	_judgment_label.text = describe(j)
-	_refresh_labels()
-	return j
+func set_two_players(on: bool) -> void:
+	two_players = on
+	panels[1].visible = on
+	panels[0].set_key_hints(KEY_HINTS_P1 if on else KEY_HINTS_SOLO)
+	panels[1].set_key_hints(KEY_HINTS_P2)
+	if _two_players_toggle.button_pressed != on:
+		_two_players_toggle.set_pressed_no_signal(on)
 
 
-static func describe(j: BeatJudge.Judgment) -> String:
-	var ms: int = roundi(j.offset * 1000.0)
-	var timing: String = "%+d ms" % ms
-	match j.grade:
-		BeatJudge.Grade.PERFECT:
-			return "PERFECT  (%s)" % timing
-		BeatJudge.Grade.GOOD:
-			return "GOOD  (%s %s)" % [timing, "early" if ms < 0 else "late"]
-		_:
-			if j.duplicate:
-				return "MISS: one rune per beat"
-			return "MISS  (%s)" % timing
-
-
-func _refresh_labels() -> void:
-	_combo_label.text = "Combo %d   (best %d)" % [combo.combo, combo.best]
-	_stats_label.text = "Perfect %d   Good %d   Miss %d" % [combo.perfects, combo.goods, combo.misses]
-	_history_label.text = "Runes: " + (" - ".join(history) if not history.is_empty() else "...")
+## Which panel an input set drives. Solo mode routes every set to P1.
+func panel_for_input(input_player: int) -> int:
+	return input_player if two_players else 0
 
 
 func _process(_delta: float) -> void:
@@ -91,15 +69,21 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	for i: int in RUNE_ACTIONS.size():
-		if event.is_action_pressed(RUNE_ACTIONS[i]):
-			_on_rune_pressed(i)
-			get_viewport().set_input_as_handled()
-			return
+	for input_player: int in 2:
+		for d: Rune.Dir in Rune.ALL:
+			if event.is_action_pressed(Rune.action_name(input_player, d)):
+				panels[panel_for_input(input_player)].submit(d, _clock.input_time())
+				get_viewport().set_input_as_handled()
+				return
 
 
-func _on_rune_pressed(rune: int) -> void:
-	submit_rune(rune, _clock.input_time())
+func _on_beat(index: int) -> void:
+	for p: PlayerPanel in panels:
+		p.on_beat(index)
+
+
+func _on_judged(t: float, grade: BeatJudge.Grade, player: int) -> void:
+	_ekg.add_marker(t, grade, player)
 
 
 func _on_setting_changed(_value: float) -> void:
