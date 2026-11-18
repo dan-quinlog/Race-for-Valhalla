@@ -67,7 +67,7 @@ func submit(rune: Rune.Dir, t: float) -> PlayerRhythm.Result:
 func on_beat(beat: int) -> void:
 	if rhythm != null and rhythm.reader.on_beat(beat):
 		_pad.clear_pending()
-		_action.text = "(command dropped: beat skipped)"
+		_action.text = "Beat skipped: rune cleared, combo kept"
 
 
 static func describe(j: BeatJudge.Judgment) -> String:

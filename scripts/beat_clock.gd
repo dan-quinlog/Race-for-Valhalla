@@ -4,8 +4,11 @@ extends Node
 ##
 ## `time` is in seconds since start() and matches what the player is hearing
 ## right now (output latency is subtracted). The buh of beat n is at n * period.
+## `beat` fires on the buh. `beat_closed` fires at the dum, when beat n's input
+## window has shut, so anything resolved there sees every input for that beat.
 
 signal beat(index: int)
+signal beat_closed(index: int)
 
 @export var bpm: float = 90.0
 ## Gap between buh and dum, in seconds. This is also the input window half-width.
@@ -22,6 +25,7 @@ var _player: AudioStreamPlayer
 var _loops: int = 0
 var _last_raw_pos: float = 0.0
 var _last_beat: int = -1
+var _last_closed: int = -1
 
 
 func _ready() -> void:
@@ -43,6 +47,7 @@ func start() -> void:
 	_loops = 0
 	_last_raw_pos = 0.0
 	_last_beat = -1
+	_last_closed = -1
 	time = 0.0
 	running = true
 	play_audio()
@@ -86,6 +91,10 @@ func emit_due_beats() -> void:
 	while _last_beat < current:
 		_last_beat += 1
 		beat.emit(_last_beat)
+	var closed: int = floori((time - dum_delay) / period)
+	while _last_closed < closed:
+		_last_closed += 1
+		beat_closed.emit(_last_closed)
 
 
 func _process(_delta: float) -> void:

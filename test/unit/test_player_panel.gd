@@ -46,7 +46,7 @@ func test_skipped_beat_drops_pending_command() -> void:
 	panel.submit(Rune.Dir.RIGHT, PERIOD)
 	panel.on_beat(3)
 	assert_eq(panel.get_node("%RunePad").pending, CommandReader.NO_RUNE)
-	assert_string_contains(_label("ActionLabel"), "dropped")
+	assert_string_contains(_label("ActionLabel"), "rune cleared")
 
 
 func test_log_is_capped() -> void:

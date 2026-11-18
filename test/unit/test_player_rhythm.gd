@@ -37,6 +37,19 @@ func test_mashing_still_executes_commands() -> void:
 	assert_false(done.action.perfect)
 
 
+func test_skipping_a_beat_clears_queue_but_keeps_combo() -> void:
+	# Start a brace, then sit out one beat to shift the command a beat later.
+	assert_true(player.submit(Rune.Dir.RIGHT, PERIOD * 4).started_command)
+	assert_true(player.reader.on_beat(6), "the empty beat 5 drops the pending rune")
+	var restart: PlayerRhythm.Result = player.submit(Rune.Dir.RIGHT, PERIOD * 6)
+	assert_true(restart.started_command, "a fresh command, not the old one's follow-up")
+	var done: PlayerRhythm.Result = player.submit(Rune.Dir.DOWN, PERIOD * 7)
+	assert_eq(done.action.kind, RuneAction.Kind.BRACE)
+	assert_eq(done.action.beat, 7)
+	assert_eq(player.combo.combo, 3)
+	assert_eq(player.combo.misses, 0)
+
+
 func test_configure_resets_state() -> void:
 	player.submit(Rune.Dir.UP, PERIOD * 2)
 	player.configure(0.5, 0.12, 0.03)

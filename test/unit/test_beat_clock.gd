@@ -51,6 +51,23 @@ func test_emits_each_beat_once() -> void:
 	assert_signal_emitted_with_parameters(clock, "beat", [1])
 
 
+func test_beat_closes_at_the_dum() -> void:
+	watch_signals(clock)
+	clock.dum_delay = 0.15
+	clock.advance(0.1, 0.0)
+	clock.emit_due_beats()
+	assert_signal_emit_count(clock, "beat_closed", 0)
+	clock.advance(0.16, 0.0)
+	clock.emit_due_beats()
+	assert_signal_emit_count(clock, "beat_closed", 1)
+	assert_signal_emitted_with_parameters(clock, "beat_closed", [0])
+	clock.advance(0.5, 0.0)
+	clock.advance(0.18, 0.0)  # wraps: 0.6 + 0.18, past beat 1's dum at 0.75
+	clock.emit_due_beats()
+	assert_signal_emit_count(clock, "beat_closed", 2)
+	assert_signal_emitted_with_parameters(clock, "beat_closed", [1])
+
+
 func test_input_time_subtracts_latency() -> void:
 	clock.advance(0.3, 0.0)
 	clock.input_latency = 0.02

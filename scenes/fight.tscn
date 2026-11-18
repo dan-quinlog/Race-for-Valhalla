@@ -1,0 +1,112 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://scripts/fight.gd" id="1_fight"]
+[ext_resource type="Script" path="res://scripts/beat_clock.gd" id="2_clock"]
+[ext_resource type="Script" path="res://scripts/ekg_display.gd" id="3_ekg"]
+[ext_resource type="Script" path="res://scripts/arena_view.gd" id="4_arena"]
+[ext_resource type="PackedScene" path="res://scenes/player_panel.tscn" id="5_panel"]
+
+[node name="Fight" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_fight")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.06, 0.05, 0.07, 1)
+
+[node name="BeatClock" type="Node" parent="."]
+unique_name_in_owner = true
+script = ExtResource("2_clock")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 12
+
+[node name="Layout" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Ekg" type="Control" parent="Margin/Layout"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 90)
+layout_mode = 2
+size_flags_vertical = 3
+script = ExtResource("3_ekg")
+
+[node name="Arena" type="Control" parent="Margin/Layout"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 200)
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_stretch_ratio = 2.0
+script = ExtResource("4_arena")
+
+[node name="Controls" type="HBoxContainer" parent="Margin/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Banner" type="Label" parent="Margin/Layout/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 0.85, 0.4, 1)
+theme_override_font_sizes/font_size = 18
+autowrap_mode = 3
+
+[node name="TwoPlayers" type="CheckButton" parent="Margin/Layout/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "2 Players"
+
+[node name="RestartButton" type="Button" parent="Margin/Layout/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Restart"
+
+[node name="LabButton" type="Button" parent="Margin/Layout/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Rhythm Lab"
+
+[node name="Bottom" type="HBoxContainer" parent="Margin/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 24
+
+[node name="Player1" parent="Margin/Layout/Bottom" instance=ExtResource("5_panel")]
+unique_name_in_owner = true
+layout_mode = 2
+
+[node name="Player2" parent="Margin/Layout/Bottom" instance=ExtResource("5_panel")]
+unique_name_in_owner = true
+layout_mode = 2
+player_index = 1
+
+[node name="FightLog" type="Label" parent="Margin/Layout/Bottom"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.8, 0.78, 0.72, 1)
+theme_override_font_sizes/font_size = 13
+autowrap_mode = 3

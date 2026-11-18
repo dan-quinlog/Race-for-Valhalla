@@ -74,6 +74,14 @@ func test_beats_expire_pending_commands() -> void:
 	assert_eq(lab.panels[0].rhythm.reader.pending, CommandReader.NO_RUNE)
 
 
+func test_fight_button_opens_fight() -> void:
+	var doubled: Control = partial_double(LabScene).instantiate()
+	stub(doubled, "go_to_scene").to_do_nothing()
+	add_child_autofree(doubled)
+	doubled.get_node("%FightButton").pressed.emit()
+	assert_called(doubled, "go_to_scene", ["res://scenes/fight.tscn"])
+
+
 func test_ekg_wave_peaks_on_buh() -> void:
 	var ekg: EkgDisplay = lab.get_node("%Ekg")
 	assert_almost_eq(ekg.wave(0.0), 1.0, 0.05)
