@@ -20,6 +20,8 @@ var ward_until: int = NONE
 var exposed: bool = false
 ## Made a Defensive attack: the next hit taken is halved.
 var guarded: bool = false
+## Glory earned this run: prayers, kills and broken boss parts.
+var glory: int = 0
 
 
 func _init(p_player: int, p_max_hp: int, p_cell: Vector2i) -> void:

@@ -15,6 +15,8 @@ enum Target {
 	ALL_ZONES,
 	## The enemy's lane, from the left edge of the screen up to the enemy.
 	LANE_LEFT,
+	## A fixed list of zones (`zones`), for bosses.
+	ZONES,
 }
 
 var display_name: String
@@ -29,6 +31,8 @@ var from_dir: int = Hero.NO_DIR
 ## Only the targeted hero nearest the attacker is hit (an arrow stops at
 ## the first body).
 var hits_first: bool = false
+## Zones hit by a ZONES move.
+var zones: Array[Vector2i] = []
 
 
 func _init(p_name: String, p_target: Target, p_windup: int, p_damage: int, p_rest: int, p_super: bool = false) -> void:
@@ -39,3 +43,10 @@ func _init(p_name: String, p_target: Target, p_windup: int, p_damage: int, p_res
 	damage = p_damage
 	rest = p_rest
 	is_super = p_super
+
+
+## A move that hits a fixed set of zones.
+static func at_zones(p_name: String, p_zones: Array[Vector2i], p_windup: int, p_damage: int, p_rest: int, p_super: bool = false) -> EnemyMove:
+	var move := EnemyMove.new(p_name, Target.ZONES, p_windup, p_damage, p_rest, p_super)
+	move.zones = p_zones
+	return move

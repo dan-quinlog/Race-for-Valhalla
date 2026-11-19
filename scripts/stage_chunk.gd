@@ -11,9 +11,11 @@ extends Resource
 ##   D  exit door
 ##   1  player 1 start, 2 player 2 start
 ##   B  brute enemy, R  ranger enemy
+##   J  Jötunn boss (its top-left zone; it covers 2 columns by 3 lanes, so
+##      leave the rest of that block open)
 
 const LANES: int = 3
-const ZONE_CHARS: String = ".#FD12BR"
+const ZONE_CHARS: String = ".#FD12BRJ"
 
 ## Lane strings, back lane (top of the screen) first. All the same length.
 @export var rows: PackedStringArray = PackedStringArray(["", "", ""])

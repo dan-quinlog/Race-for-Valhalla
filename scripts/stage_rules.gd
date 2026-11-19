@@ -7,7 +7,8 @@ extends RefCounted
 ## lead hero while keeping every living hero on screen. It stops at the next
 ## uncleared encounter (the lock) until that area's enemies are dead. Once
 ## every encounter is cleared, the exit door opens; the stage is won when
-## every living hero stands on it.
+## every living hero stands on it. A stage with no door (a boss arena) is won
+## as soon as every encounter is cleared.
 ##
 ## Hero actions resolve as they complete. Enemies and hazards resolve when a
 ## beat closes (at the dum), so a brace or dodge entered on the hit beat
@@ -32,6 +33,8 @@ const BLESSED_BONUS: float = 0.5
 const EXPOSED_MULTIPLIER: float = 1.5
 const GUARDED_MULTIPLIER: float = 0.5
 const RETALIATE_DAMAGE: int = 10
+## Glory for breaking a boss part.
+const PART_GLORY: int = 10
 
 const STEPS: Array[Vector2i] = [Vector2i(0, -1), Vector2i(0, 1), Vector2i(-1, 0), Vector2i(1, 0)]  # by Rune.Dir
 
@@ -74,6 +77,8 @@ static func spawn(kind: String, cell: Vector2i) -> Enemy:
 	match kind:
 		"R":
 			return RangerEnemy.new(cell)
+		"J":
+			return BossEnemy.jotunn(cell)
 		_:
 			return BruteEnemy.new(cell)
 
@@ -107,7 +112,7 @@ func visible_cells() -> Array[Vector2i]:
 
 func enemy_at(cell: Vector2i) -> Enemy:
 	for e: Enemy in enemies:
-		if e.is_alive() and e.cell == cell:
+		if e.is_alive() and e.occupies(cell):
 			return e
 	return null
 
@@ -191,8 +196,10 @@ func act(player: int, action: RuneAction) -> String:
 			hero.brace_blessed = action.empowered
 			text = "%s braces %s%s" % [hero.display_name, Rune.DIR_NAMES[action.dir], " (retaliating)" if action.empowered else ""]
 		RuneAction.Kind.PRAY:
-			pass
-	if text != "":
+			if action.glory > 0:
+				hero.glory += action.glory
+	# Attacks log themselves, so their result reads before any break or kill.
+	if text != "" and action.kind != RuneAction.Kind.ATTACK:
 		logged.emit(text)
 	if action.kind == RuneAction.Kind.MOVE:
 		_check_exit()
@@ -217,8 +224,10 @@ func _attack(hero: Hero, action: RuneAction) -> String:
 		hero.exposed = true
 	var foe: Enemy = enemy_at(hero.cell)
 	if foe == null:
-		return "%s: %s hits nothing" % [hero.display_name, attack_name]
-	var dealt: int = foe.take_damage(attack_damage(action.attack, action.perfect, action.empowered))
+		var miss: String = "%s: %s hits nothing" % [hero.display_name, attack_name]
+		logged.emit(miss)
+		return miss
+	var dealt: int = foe.take_hit(hero.cell, attack_damage(action.attack, action.perfect, action.empowered))
 	var extra: String = ""
 	match action.attack:
 		RuneAction.Attack.TRIP:
@@ -231,7 +240,8 @@ func _attack(hero: Hero, action: RuneAction) -> String:
 			hero.guarded = true
 			extra = ", guarding"
 	var text: String = "%s: %s on %s for %d%s" % [hero.display_name, attack_name, foe.display_name, dealt, extra]
-	_check_enemy_dead(foe)
+	logged.emit(text)
+	_after_hit(foe, hero)
 	return text
 
 
@@ -253,6 +263,9 @@ func _resolve(beat: int) -> void:
 				if hero.cell in fire.cells:
 					_burn(hero, beat)
 	if _check_heroes_dead():
+		return
+	_bleed()
+	if over:
 		return
 	var active: Array[Enemy] = enemies.filter(func(e: Enemy) -> bool: return e.is_alive() and is_on_screen(e.cell.x))
 	for e: Enemy in active:
@@ -304,7 +317,7 @@ func _hit(hero: Hero, enemy: Enemy, move: EnemyMove, beat: int) -> void:
 		if hero.brace_blessed and enemy.is_alive():
 			text += " and strikes back for %d" % enemy.take_damage(RETALIATE_DAMAGE)
 		logged.emit(text)
-		_check_enemy_dead(enemy)
+		_check_enemy_dead(enemy, hero)
 		return
 	var mult: float = 1.0
 	if hero.exposed:
@@ -344,10 +357,32 @@ func _update_camera() -> void:
 		logged.emit("Foes bar the way! Clear the area.")
 
 
-func _check_enemy_dead(enemy: Enemy) -> void:
+## Credits boss part breaks and a kill to `hero` after it hit `foe`.
+func _after_hit(foe: Enemy, hero: Hero) -> void:
+	if foe is BossEnemy:
+		for part: BossPart in (foe as BossEnemy).pop_broken():
+			hero.glory += PART_GLORY
+			logged.emit("%s breaks the %s's %s! +%d glory. It bleeds." % [hero.display_name, foe.display_name, part.display_name, PART_GLORY])
+	_check_enemy_dead(foe, hero)
+
+
+## Bosses lose HP for each wound. Bleeding out earns no one the kill.
+func _bleed() -> void:
+	for e: Enemy in enemies:
+		if e is BossEnemy and e.is_alive() and e.bleed() > 0 and not e.is_alive():
+			logged.emit("The %s bleeds out. No glory in that!" % e.display_name)
+			_check_enemy_dead(e)
+
+
+## `killer` (if any) earns the enemy's glory.
+func _check_enemy_dead(enemy: Enemy, killer: Hero = null) -> void:
 	if over or enemy.is_alive():
 		return
-	logged.emit("%s is slain!" % enemy.display_name)
+	if killer != null:
+		killer.glory += enemy.glory_value
+		logged.emit("%s is slain by %s! +%d glory" % [enemy.display_name, killer.display_name, enemy.glory_value])
+	else:
+		logged.emit("%s is slain!" % enemy.display_name)
 	_update_clears()
 
 
@@ -365,6 +400,10 @@ func _update_clears(announce: bool = true) -> void:
 	_update_camera()
 	if not door_open and next_encounter() < 0:
 		door_open = true
+		if announce and map.door == StageMap.NO_CELL:
+			logged.emit("Victory!")
+			_end(true)
+			return
 		if announce:
 			logged.emit("Area clear! The exit door opens!")
 			door_opened.emit()
