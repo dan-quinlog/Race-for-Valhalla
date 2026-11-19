@@ -328,9 +328,11 @@ func test_brace_does_not_stop_fire_but_ward_does() -> void:
 func test_all_heroes_dead_loses() -> void:
 	_rules(["....", "1...", "...."], 1, [_own_zone_foe(Vector2i(0, 1), 2, 999)])
 	rules.close_beat(2)
+	assert_false(rules.over, "the final strike is still to come")
+	assert_eq(_attack(Rune.Dir.LEFT, 3), "", "the fallen can't take normal actions")
+	rules.close_beat(5)
 	assert_true(rules.over)
 	assert_false(rules.won)
-	assert_eq(_attack(Rune.Dir.LEFT, 3), "")
 
 
 func test_one_fallen_hero_does_not_end_coop() -> void:
@@ -398,3 +400,145 @@ func test_tripping_supers_keeps_the_enemy_on_beat() -> void:
 		"Grave Claw:0", "Barrow Slam:0", "Death Howl:0", "Grave Claw:0", "Grave Wrath:0",
 		"Grave Claw:0", "Barrow Slam:0", "Death Howl:0", "Grave Claw:0", "Grave Wrath:0",
 	])
+
+
+# --- Final strike -------------------------------------------------------------
+
+## The Jötunn arena: boss in columns 2-3, heroes on the left.
+func _arena(players: int = 1) -> BossEnemy:
+	var chunk := StageChunk.from_rows(["..J.", "1...", "2..."], true)
+	rules = StageRules.new(StageMap.build([chunk]), players)
+	return rules.enemies[0]
+
+
+## Kills hero `p` as beat `beat` closes, as an enemy hit would.
+func _fell(p: int, beat: int) -> void:
+	rules.close_beat(beat - 1)
+	_hero(p).hp = 0
+	rules._fall(_hero(p), beat)
+	rules.closed_through = beat
+
+
+func test_falling_schedules_a_final_strike_after_two_silent_beats() -> void:
+	_arena(2)
+	watch_signals(rules)
+	_fell(0, 5)
+	assert_eq(_hero().final_beat, 8)
+	assert_signal_emitted_with_parameters(rules, "hero_fell", [0, 8])
+
+
+func test_final_strike_only_on_the_final_beat() -> void:
+	var boss := _arena(2)
+	_fell(0, 5)
+	assert_eq(rules.final_strike(0, Rune.Dir.UP, 7, false, false), "", "a silent beat")
+	assert_eq(boss.hp, 300)
+	assert_string_contains(rules.final_strike(0, Rune.Dir.UP, 8, false, false), "final Throw")
+	assert_false(_hero().has_final_strike())
+	assert_eq(rules.final_strike(0, Rune.Dir.UP, 8, false, false), "", "spent")
+
+
+func test_no_input_defaults_to_strike() -> void:
+	var boss := _arena(2)
+	_hero().cell = Vector2i(2, 1)
+	_fell(0, 5)
+	rules.close_beat(8)
+	assert_false(_hero().has_final_strike())
+	assert_eq(boss.hp, 300 - StageRules.STRIKE_DAMAGE)
+
+
+func test_throw_hits_top_lane_of_nearest_boss_column() -> void:
+	var boss := _arena(2)
+	assert_eq(rules._throw_target(_hero()), Vector2i(2, 0))
+	_hero().cell = Vector2i(3, 2)
+	assert_eq(rules._throw_target(_hero()), Vector2i(3, 0), "inside the boss: own column")
+	_hero().cell = Vector2i(0, 1)
+	_fell(0, 5)
+	rules.final_strike(0, Rune.Dir.UP, 8, false, false)
+	assert_eq(boss.part_at(Vector2i(2, 0)).damage, StageRules.THROW_DAMAGE, "the club arm, armored")
+
+
+func test_charge_hits_each_boss_zone_ahead() -> void:
+	_arena(2)
+	var from_left: Array[int] = rules.final_preview(_hero())
+	assert_eq(from_left[Rune.Dir.RIGHT], 60, "two bare body zones, 20 x 1.5 each")
+	_hero().cell = Vector2i(2, 1)
+	assert_eq(rules.final_preview(_hero())[Rune.Dir.RIGHT], 30, "start zone not included")
+	_hero().cell = Vector2i(3, 1)
+	assert_eq(rules.final_preview(_hero())[Rune.Dir.RIGHT], 0)
+
+
+func test_charge_moves_the_fallen_hero_to_the_right_edge() -> void:
+	_arena(2)
+	_fell(0, 5)
+	rules.final_strike(0, Rune.Dir.RIGHT, 8, false, false)
+	assert_eq(_hero().cell, Vector2i(3, 1))
+
+
+func test_flurry_favors_bare_zones_in_the_next_column() -> void:
+	var boss := _arena(2)
+	_hero().cell = Vector2i(1, 1)
+	assert_eq(rules.final_preview(_hero())[Rune.Dir.LEFT], 10 + 25 + 25, "club arm, then two body zones")
+	boss.take_hit(Vector2i(2, 0), 40)
+	assert_eq(rules.final_preview(_hero())[Rune.Dir.LEFT], 75, "a broken arm is bare too")
+	_hero().cell = Vector2i(0, 1)
+	assert_eq(rules.final_preview(_hero())[Rune.Dir.LEFT], 0, "column 1 is empty")
+
+
+func test_strike_grows_with_every_broken_part() -> void:
+	var boss := _arena(2)
+	_hero().cell = Vector2i(3, 1)
+	assert_eq(rules.final_preview(_hero())[Rune.Dir.DOWN], 25)
+	for c: Vector2i in [Vector2i(2, 0), Vector2i(3, 0), Vector2i(3, 2)]:
+		boss.take_hit(c, 40)
+	assert_eq(rules.final_preview(_hero())[Rune.Dir.DOWN], 100)
+	_hero().cell = Vector2i(0, 1)
+	assert_eq(rules.final_preview(_hero())[Rune.Dir.DOWN], 0, "nothing in your zone")
+
+
+func test_perfect_and_blessed_boost_the_final_strike() -> void:
+	var boss := _arena(2)
+	_hero().cell = Vector2i(2, 1)
+	_fell(0, 5)
+	rules.final_strike(0, Rune.Dir.DOWN, 8, true, true)
+	assert_eq(boss.hp, 300 - StageRules.STRIKE_DAMAGE * 2)
+
+
+func test_final_strike_kill_wins_with_bonus_glory_even_after_death() -> void:
+	var boss := _arena(1)
+	boss.hp = 10
+	_hero().cell = Vector2i(2, 1)
+	_fell(0, 5)
+	assert_false(rules.over, "waiting on the final strike")
+	rules.final_strike(0, Rune.Dir.DOWN, 8, false, false)
+	assert_true(rules.won)
+	assert_eq(_hero().glory, boss.glory_value + StageRules.FINAL_KILL_GLORY)
+
+
+func test_last_hero_loses_once_the_final_strike_misses_the_kill() -> void:
+	_arena(1)
+	_fell(0, 5)
+	rules.close_beat(7)
+	assert_false(rules.over)
+	rules.final_strike(0, Rune.Dir.UP, 8, false, false)
+	assert_true(rules.over)
+	assert_false(rules.won)
+
+
+func test_final_strike_works_on_stage_enemies() -> void:
+	var brute := BruteEnemy.new(Vector2i(2, 1))
+	_rules(["....", "1...", "...."], 1, [brute])
+	_fell(0, 5)
+	assert_eq(rules._throw_target(_hero()), brute.cell, "no boss: nearest foe")
+	assert_eq(brute.cell.y, 1, "the brute stays in the hero's lane")
+	rules.final_strike(0, Rune.Dir.RIGHT, 8, false, false)
+	assert_eq(brute.hp, BruteEnemy.MAX_HP - StageRules.CHARGE_DAMAGE)
+
+
+func test_enemy_hit_that_kills_starts_the_final_strike() -> void:
+	_rules(["....", "1...", "...."], 1, [_own_zone_foe(Vector2i(0, 1), 2, 999)])
+	watch_signals(rules)
+	rules.close_beat(2)
+	assert_signal_emitted_with_parameters(rules, "hero_fell", [0, 5])
+	assert_false(rules.over)
+	rules.close_beat(5)
+	assert_true(rules.over, "default Strike resolved, then the stage is lost")
