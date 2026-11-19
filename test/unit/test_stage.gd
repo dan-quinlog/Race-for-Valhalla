@@ -9,6 +9,7 @@ var stage: Control
 func before_each() -> void:
 	stage = partial_double(StageScene).instantiate()
 	stub(stage, "go_to_scene").to_do_nothing()
+	stub(stage, "schedule_next_stage").to_do_nothing()
 	add_child_autofree(stage)
 	await wait_process_frames(2)
 
@@ -82,7 +83,57 @@ func test_reaching_the_door_clears_the_stage() -> void:
 	stage.rules.heroes[0].cell = Vector2i(8, 2)
 	_kill_all()
 	assert_true(stage.rules.won)
-	assert_string_starts_with(stage.get_node("%Banner").text, "Stage clear")
+	assert_string_starts_with(stage.get_node("%Banner").text, "Through the door")
+	assert_called(stage, "schedule_next_stage")
+
+
+func test_next_stage_is_the_boss_and_carries_heroes_over() -> void:
+	stage.rules.heroes[0].hp = 33
+	stage.rules.heroes[0].glory = 7
+	stage.advance_stage()
+	assert_eq(stage.stage_index, 1)
+	assert_true(stage.rules.enemies[0] is BossEnemy)
+	assert_eq(stage.rules.heroes[0].hp, 33)
+	assert_eq(stage.rules.heroes[0].glory, 7)
+	assert_string_contains(stage.get_node("%Banner").text, "Jötunn")
+
+
+func test_boss_button_starts_the_arena_fresh() -> void:
+	stage.rules.heroes[0].hp = 5
+	stage.get_node("%BossButton").pressed.emit()
+	assert_eq(stage.stage_index, 1)
+	assert_eq(stage.rules.heroes[0].hp, StageRules.HERO_HP)
+	assert_eq(stage.rules.map.width, StageRules.VIEW_COLS, "a single screen")
+
+
+func test_fallen_hero_gets_final_strike_pad_and_ekg_heart() -> void:
+	stage.start_stage(1)
+	var hero: Hero = stage.rules.heroes[0]
+	hero.cell = Vector2i(2, 1)
+	hero.hp = 0
+	stage.rules._fall(hero, 4)
+	var panel: PlayerPanel = stage.panels[0]
+	assert_eq(panel.rhythm.final_beat, 7)
+	assert_false(panel.get_node("%RunePad").final_labels.is_empty())
+	assert_eq(stage.get_node("%Ekg").final_marker_count(), 1)
+	stage.rules.closed_through = 6
+	panel.submit(Rune.Dir.DOWN, _period() * 7)
+	assert_eq(stage.rules.enemies[0].hp, 300 - roundi(StageRules.STRIKE_DAMAGE * 1.5), "Perfect Strike on the body")
+	assert_false(hero.has_final_strike())
+	assert_true(panel.get_node("%RunePad").final_labels.is_empty())
+
+
+func test_final_strike_victory_banner() -> void:
+	stage.start_stage(1)
+	var hero: Hero = stage.rules.heroes[0]
+	hero.cell = Vector2i(2, 1)
+	stage.rules.enemies[0].hp = 5
+	hero.hp = 0
+	stage.rules._fall(hero, 4)
+	stage.rules.closed_through = 6
+	stage.panels[0].submit(Rune.Dir.DOWN, _period() * 7)
+	assert_true(stage.rules.won)
+	assert_string_starts_with(stage.get_node("%Banner").text, "Victory in death")
 
 
 func test_restart_resets_stage() -> void:
@@ -107,6 +158,8 @@ func test_view_tags_show_hero_state() -> void:
 	assert_eq(StageView.hero_tags(hero, 3), "BRACE+→ EXPOSED")
 	hero.hp = 0
 	assert_eq(StageView.hero_tags(hero, 3), "FALLEN")
+	hero.final_beat = 6
+	assert_eq(StageView.hero_tags(hero, 3), "FINAL STRIKE")
 
 
 func test_view_splits_into_four_columns_and_three_lanes() -> void:

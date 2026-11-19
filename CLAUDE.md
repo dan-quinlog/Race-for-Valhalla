@@ -9,9 +9,9 @@ A roguelike rhythm game. Viking warriors act on the beat of their own heart, cha
 
 ## Layout
 - `scenes/`, `scripts/` (one script per scene, plus `class_name` helper classes), `test/unit/`.
-- `scenes/stage.tscn` is the main scene: a scrolling stage (one or two heroes) drawn by `StageView`. It has a button to the Rhythm Lab.
+- `scenes/stage.tscn` is the main scene: a run of stages (one or two heroes) drawn by `StageView`. The first stage's exit door leads to the Jötunn boss arena, carrying over health and glory. Restart goes back to stage 1, the Boss button jumps straight to the arena, and another button opens the Rhythm Lab.
 - `scenes/rhythm_lab.tscn` is the test bench for the heartbeat and rune commands, with tunable BPM, windows and latency. Both scenes hold one or two `player_panel.tscn` (each with a `rune_pad.tscn`).
-- `stages/chunks/*.tres` are `StageChunk` resources: three lane strings (`.` open, `#` wall, `F` fire, `D` door, `1`/`2` starts, `B` brute, `R` ranger) plus an `encounter` flag. `StageMap.build` stitches chunks left to right. Stages are hand-listed for now (`stage.gd` `FIRST_STAGE`), but are meant to be generated from shuffled chunks later.
+- `stages/chunks/*.tres` are `StageChunk` resources: three lane strings (`.` open, `#` wall, `F` fire, `D` door, `1`/`2` starts, `B` brute, `R` ranger, `J` Jötunn boss at its top-left zone) plus an `encounter` flag. `StageMap.build` stitches chunks left to right. Stages are hand-listed for now (`stage.gd` `STAGES`), but are meant to be generated from shuffled chunks later.
 
 ## Core rhythm model
 - `BeatClock` (`scripts/beat_clock.gd`) is the master clock. It is locked to audio playback of a looping, synthesized heartbeat (`HeartbeatAudio`), not to frame time. The buh of beat `n` is at `n * period`.
@@ -43,6 +43,15 @@ A roguelike rhythm game. Viking warriors act on the beat of their own heart, cha
 - **Braces face a direction:** they stop hits in the zone (`from_dir` none) and hits coming from the braced side (an arrow needs a brace facing right). A brace covers its beat and the next. A blessed brace strikes back for 10. A warded (blessed) move ignores enemy hits and fire for the same two beats.
 - **Fire** (`FireTrap`) burns a column on a 4-off / 2-on beat cycle. A ward stops it, but a brace does not.
 - **Attacks:** Standard 10. Heavy 20, but the hero is exposed (takes +50%) until their next command. Trip 4 and staggers. Defensive 6 and halves the next hit. Perfect and blessed each add +50%. Numbers are placeholders in `StageRules` and enemy constants.
+- **Bosses** (`BossEnemy`) cover several zones (`footprint`) with one health pool. Every hit damages the pool, and a hit on an intact part's zone also wears that `BossPart` down. Hits on bare zones (body, or a broken part) deal +50%, so the body is the safer, lower-glory route. A broken part gives its breaker +10 glory, bleeds the boss 1 HP per beat, and turns its attack slot enraged. A boss that bleeds out earns no one the kill glory.
+  - The Jötunn covers 2x3 zones: Club Arm (front top), Head (back top), Legs (back bottom), and three body zones. It cycles Club Slam / Frost Breath / Stomp. Broken parts turn these into Wild Flail / the off-beat Jötunn's Roar super / Quake.
+- **Glory** (`Hero.glory`) comes from prayers (Prayer + Prayer), killing blows (`Enemy.glory_value`; 3 for regular foes, 25 for the boss), part breaks, and final-strike kills (+25 extra).
+- **Final strike:** a hero who falls as beat `n` closes stays silent on `n+1` and `n+2`, and strikes once on `n+3` (`Hero.final_beat`). Fallen runes are ignored except an accepted one on that beat (`PlayerRhythm.begin_final`). With no input, it's a Strike. The stage isn't lost until every pending final strike resolves, so a dead party can still win. Perfect and an unspent Attack blessing each add +50%.
+  - Up, Throw (30): the top lane of the nearest boss column (your own column if you stand in the boss), or the nearest foe if there's no boss. Bare-zone bonus applies.
+  - Right, Charge (20 per zone): every foe zone ahead in your lane, not your start zone. Bare-zone bonus applies. The body ends at the right edge.
+  - Left, Flurry (10 per zone, +15 if bare): the whole next column.
+  - Down, Strike (25, +25 per broken part): your own zone.
+  - During the silent beats the rune pad shows each strike with its damage (`StageRules.final_preview`) and highlights the best one. The EKG marks the final beat with a white heart numbered by player. The EKG itself keeps running, since the heartbeat is shared.
 
 ## Tests
 The default commands from `../../CLAUDE.md` apply as written, with no overrides:

@@ -4,6 +4,7 @@ extends Control
 ## Upcoming beats scroll in from the right, and the buh spike crosses the
 ## center line on the beat. Shaded bands show the hit and perfect windows.
 ## Input markers stay on the trace so early and late hits are visible.
+## A white heart with a player number marks that player's final beat.
 
 const BG_COLOR := Color(0.04, 0.06, 0.05)
 const GRID_COLOR := Color(0.1, 0.2, 0.12)
@@ -12,6 +13,8 @@ const WINDOW_COLOR := Color(1.0, 1.0, 1.0, 0.07)
 const PERFECT_COLOR := Color(1.0, 0.85, 0.3, 0.16)
 const CENTER_COLOR := Color(1.0, 1.0, 1.0, 0.35)
 const HEART_COLOR := Color(0.9, 0.12, 0.18)
+const FINAL_HEART_COLOR := Color(1, 1, 1)
+const FINAL_TEXT_COLOR := Color(0.1, 0.05, 0.05)
 const GRADE_COLORS := {
 	BeatJudge.Grade.PERFECT: Color(1.0, 0.85, 0.3),
 	BeatJudge.Grade.GOOD: Color(0.5, 0.8, 1.0),
@@ -28,6 +31,7 @@ var seconds_visible: float = 3.0
 var now: float = 0.0
 
 var _markers: Array[Dictionary] = []
+var _finals: Array[Dictionary] = []
 
 
 func configure(p_period: float, p_dum_delay: float, p_window: float, p_perfect_window: float) -> void:
@@ -36,6 +40,7 @@ func configure(p_period: float, p_dum_delay: float, p_window: float, p_perfect_w
 	window = p_window
 	perfect_window = p_perfect_window
 	_markers.clear()
+	_finals.clear()
 	queue_redraw()
 
 
@@ -43,6 +48,7 @@ func set_time(t: float) -> void:
 	now = t
 	while not _markers.is_empty() and _markers[0].time < now - seconds_visible:
 		_markers.pop_front()
+	_finals = _finals.filter(func(f: Dictionary) -> bool: return float(f.time) >= now - seconds_visible)
 	queue_redraw()
 
 
@@ -54,6 +60,16 @@ func add_marker(t: float, grade: BeatJudge.Grade, lane: int = 0) -> void:
 
 func marker_count() -> int:
 	return _markers.size()
+
+
+## Marks player `player`'s final beat at time t with a numbered white heart.
+func add_final_marker(t: float, player: int) -> void:
+	_finals.append({"time": t, "player": player})
+	queue_redraw()
+
+
+func final_marker_count() -> int:
+	return _finals.size()
 
 
 ## Trace height at time t, roughly -0.35..1.0. The buh spike peaks at each beat
@@ -105,6 +121,15 @@ func _draw() -> void:
 		draw_line(Vector2(mx, baseline - amp - 6.0), Vector2(mx, baseline + 18.0), col, 2.0)
 		draw_circle(Vector2(mx, tip), 5.0, col)
 
+	var font: Font = get_theme_default_font()
+	var r: float = minf(h, w) * 0.06
+	for f: Dictionary in _finals:
+		var fx: float = cx + (float(f.time) - now) * px
+		var fy: float = baseline - amp * 0.45 if int(f.player) == 0 else baseline - amp * 0.95
+		_draw_heart(Vector2(fx, fy), r, FINAL_HEART_COLOR)
+		var font_size: int = maxi(10, int(r * 1.1))
+		draw_string(font, Vector2(fx - r, fy + font_size * 0.3), str(int(f.player) + 1), HORIZONTAL_ALIGNMENT_CENTER, r * 2.0, font_size, FINAL_TEXT_COLOR)
+
 	_draw_heart(Vector2(cx, h * 0.14), minf(h, w) * 0.07 * _pulse())
 
 
@@ -116,11 +141,11 @@ func _pulse() -> float:
 	return 1.0 + 0.35 * maxf(buh, dum)
 
 
-func _draw_heart(center: Vector2, radius: float) -> void:
+func _draw_heart(center: Vector2, radius: float, color: Color = HEART_COLOR) -> void:
 	var pts := PackedVector2Array()
 	for i: int in 48:
 		var t: float = TAU * i / 48.0
 		var hx: float = 16.0 * pow(sin(t), 3.0)
 		var hy: float = 13.0 * cos(t) - 5.0 * cos(2.0 * t) - 2.0 * cos(3.0 * t) - cos(4.0 * t)
 		pts.append(center + Vector2(hx, -hy) * (radius / 16.0))
-	draw_colored_polygon(pts, HEART_COLOR)
+	draw_colored_polygon(pts, color)

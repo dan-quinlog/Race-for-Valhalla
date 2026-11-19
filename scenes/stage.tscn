@@ -84,6 +84,12 @@ layout_mode = 2
 focus_mode = 0
 text = "Restart"
 
+[node name="BossButton" type="Button" parent="Margin/Layout/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Boss"
+
 [node name="LabButton" type="Button" parent="Margin/Layout/Controls"]
 unique_name_in_owner = true
 layout_mode = 2

@@ -9,6 +9,8 @@ signal rune_pressed(dir: Rune.Dir)
 
 const BASE_COLOR := Color(1, 1, 1)
 const PENDING_COLOR := Color(1.0, 0.8, 0.3)
+const FINAL_COLOR := Color(0.75, 0.75, 0.8)
+const FINAL_BEST_COLOR := Color(1.0, 1.0, 1.0)
 const GRADE_FLASH := {
 	BeatJudge.Grade.PERFECT: Color(1.0, 0.9, 0.4),
 	BeatJudge.Grade.GOOD: Color(0.55, 0.85, 1.0),
@@ -17,6 +19,10 @@ const GRADE_FLASH := {
 
 var key_hints: Array[String] = ["", "", "", ""]
 var pending: int = CommandReader.NO_RUNE
+## While a fallen hero picks a final strike: one label per Rune.Dir.
+var final_labels: Array[String] = []
+## Rune.Dir of the strongest final strike, highlighted.
+var final_best: int = -1
 
 @onready var _buttons: Array[Button] = [%Up, %Down, %Left, %Right]
 @onready var _center: Label = %Center
@@ -48,9 +54,25 @@ func clear_pending() -> void:
 	_refresh()
 
 
+## Shows the final strike options in place of the runes' roles.
+func show_final(labels: Array[String], best: int) -> void:
+	final_labels = labels
+	final_best = best
+	pending = CommandReader.NO_RUNE
+	_refresh()
+
+
+func clear_final() -> void:
+	final_labels = []
+	final_best = -1
+	_refresh()
+
+
 func button_text(d: Rune.Dir) -> String:
 	var detail: String = Rune.ROLES[d]
-	if pending != CommandReader.NO_RUNE:
+	if not final_labels.is_empty():
+		detail = final_labels[d]
+	elif pending != CommandReader.NO_RUNE:
 		detail = CommandReader.options_for(pending as Rune.Dir)[d]
 	var text: String = "%s\n%s" % [Rune.NAMES[d], detail]
 	if key_hints[d] != "":
@@ -66,6 +88,8 @@ func flash(d: Rune.Dir, grade: BeatJudge.Grade) -> void:
 
 
 func _rest_color(d: Rune.Dir) -> Color:
+	if not final_labels.is_empty():
+		return FINAL_BEST_COLOR if d == final_best else FINAL_COLOR
 	return PENDING_COLOR if d == pending else BASE_COLOR
 
 
