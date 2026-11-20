@@ -28,6 +28,8 @@ var next_start: int = 0
 var phase: int = 0
 ## Index into the stage's encounters, or -1.
 var encounter: int = -1
+## Glory for the hero who lands the killing blow.
+var glory_value: int = 3
 
 var _hero_cursor: int = 0
 
@@ -50,6 +52,28 @@ func is_off_beat() -> bool:
 ## True while the enemy's rhythm is shifted off the beat.
 func is_rhythm_off_beat() -> bool:
 	return phase != 0
+
+
+## True if the enemy stands in `c`. Bosses cover several zones.
+func occupies(c: Vector2i) -> bool:
+	return c == cell
+
+
+## Damage from a hero striking zone `c`. Returns the HP lost. Bosses use
+## the zone to damage parts, and `zone_bonus` to boost hits on bare zones.
+func take_hit(_c: Vector2i, amount: int, _zone_bonus: bool = true) -> int:
+	return take_damage(amount)
+
+
+## True if `c` is one of the enemy's zones with no armor (no part, or a
+## broken one). Only bosses have armor.
+func is_unarmored(_c: Vector2i) -> bool:
+	return false
+
+
+## Broken boss parts (0 for ordinary enemies).
+func broken_parts() -> int:
+	return 0
 
 
 ## Beats left until the current move lands, counted from the last closed beat.
@@ -88,6 +112,8 @@ func aim(move: EnemyMove, stage: StageRules) -> Array[Vector2i]:
 		EnemyMove.Target.LANE_LEFT:
 			for col: int in range(stage.camera_col, cell.x):
 				out.append(Vector2i(col, cell.y))
+		EnemyMove.Target.ZONES:
+			out = move.zones.duplicate()
 		EnemyMove.Target.HERO_ZONE:
 			var living: Array[Hero] = stage.living_heroes()
 			if living.is_empty():

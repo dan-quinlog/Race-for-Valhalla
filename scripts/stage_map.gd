@@ -9,7 +9,7 @@ const NO_CELL := Vector2i(-1, -1)
 
 
 class Spawn:
-	## Chunk character for the enemy kind ("B", "R").
+	## Chunk character for the enemy kind ("B", "R", "J").
 	var kind: String
 	var cell: Vector2i
 	## Index into StageMap.encounters, or -1 outside any encounter.
@@ -69,7 +69,7 @@ static func build(chunks: Array[StageChunk]) -> StageMap:
 						map.door = cell
 					"1", "2":
 						starts[int(row[i]) - 1] = cell
-					"B", "R":
+					"B", "R", "J":
 						map.spawns.append(Spawn.new(row[i], cell, encounter_index))
 		map.width += chunk.width()
 	assert(starts.has(0), "a stage needs a player 1 start")

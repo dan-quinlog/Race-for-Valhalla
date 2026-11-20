@@ -113,3 +113,11 @@ func test_reset_clears_state() -> void:
 	assert_eq(reader.pending, CommandReader.NO_RUNE)
 	assert_eq(reader.glory, 0)
 	assert_false(reader.blessings[D])
+
+
+func test_skipped_follow_up_beat_clears_queue_when_it_closes() -> void:
+	reader.feed(L, 5, false)
+	assert_false(reader.on_beat_closed(5), "the first rune's own beat closing keeps it")
+	assert_true(reader.on_beat_closed(6), "the follow-up beat closed empty")
+	assert_eq(reader.pending, CommandReader.NO_RUNE)
+	assert_false(reader.on_beat_closed(7))

@@ -3,7 +3,10 @@ extends Control
 ## Draws a StageRules state: the visible window of zones (VIEW_COLS by 3
 ## lanes), scrolling smoothly toward the logic camera. Shows walls, fire
 ## traps and their countdown, the exit door, telegraphed enemy targets with
-## countdowns, enemies, heroes, and the lock / GO prompts.
+## countdowns, enemies, a boss's parts and wounds, heroes (and fallen
+## heroes awaiting their final strike), and the lock / GO prompts.
+## A hero glows with their pending rune's color from the first beat of a
+## command until the second, and glows white once fallen.
 ## Placeholder shapes until real sprites exist.
 
 const SCROLL_SPEED: float = 6.0
@@ -23,6 +26,13 @@ const SUPER_FILL := Color(0.6, 0.2, 0.9, 0.25)
 const BRUTE_COLOR := Color(0.45, 0.55, 0.5)
 const RANGER_COLOR := Color(0.55, 0.5, 0.35)
 const PATTERN_COLOR := Color(0.4, 0.5, 0.45)
+const BOSS_BODY := Color(0.35, 0.5, 0.6, 0.55)
+const BOSS_PLATE := Color(0.6, 0.72, 0.8, 0.85)
+const BOSS_WOUND := Color(0.6, 0.05, 0.08, 0.85)
+const FINAL_COLOR := Color(1, 1, 1)
+## Seconds a rune aura takes to fade back to neutral once its command ends.
+const AURA_FADE: float = 0.3
+const DEATH_AURA := Color(1, 1, 1)
 const HERO_COLORS: Array[Color] = [Color(0.45, 0.7, 1.0), Color(1.0, 0.65, 0.3)]
 const DEAD_COLOR := Color(0.35, 0.35, 0.35)
 const HP_BACK := Color(0.15, 0.05, 0.05)
@@ -40,6 +50,28 @@ var rules: StageRules:
 var display_col: float = 0.0
 
 var _time: float = 0.0
+## Per player: Rune.Dir of the pending rune lighting the hero, or NO_RUNE.
+var auras: Array[int] = [CommandReader.NO_RUNE, CommandReader.NO_RUNE]
+## Per player: the last aura color and how much of it is still showing (0-1).
+var _aura_colors: Array[Color] = [Color.WHITE, Color.WHITE]
+var _aura_strength: Array[float] = [0.0, 0.0]
+
+
+## Lights player `player`'s hero with rune `rune`'s color, or fades it back
+## to neutral for NO_RUNE.
+func set_aura(player: int, rune: int) -> void:
+	auras[player] = rune
+	if rune != CommandReader.NO_RUNE:
+		_aura_colors[player] = Rune.COLORS[rune]
+		_aura_strength[player] = 1.0
+	queue_redraw()
+
+
+## The aura behind a hero right now (alpha 0 means none).
+func aura_color(h: Hero) -> Color:
+	if not h.is_alive():
+		return DEATH_AURA * Color(1, 1, 1, 0.6 + 0.25 * sin(_time * 3.0))
+	return _aura_colors[h.player] * Color(1, 1, 1, _aura_strength[h.player])
 
 
 func zone_size() -> Vector2:
@@ -56,7 +88,7 @@ func cell_rect(cell: Vector2i) -> Rect2:
 ## Status tags under a hero for the coming beat.
 static func hero_tags(hero: Hero, beat: int) -> String:
 	if not hero.is_alive():
-		return "FALLEN"
+		return "FINAL STRIKE" if hero.has_final_strike() else "FALLEN"
 	var tags: Array[String] = []
 	if hero.is_warded(beat):
 		tags.append("WARD")
@@ -73,6 +105,9 @@ static func hero_tags(hero: Hero, beat: int) -> String:
 
 func _process(delta: float) -> void:
 	_time += delta
+	for p: int in auras.size():
+		if auras[p] == CommandReader.NO_RUNE and _aura_strength[p] > 0.0:
+			_aura_strength[p] = maxf(0.0, _aura_strength[p] - delta / AURA_FADE)
 	if rules != null:
 		display_col = move_toward(display_col, rules.camera_col, delta * SCROLL_SPEED * maxf(1.0, rules.camera_col - display_col))
 	queue_redraw()
@@ -93,13 +128,19 @@ func _draw() -> void:
 	for col: int in visible_cols:
 		for lane: int in StageMap.LANES:
 			_draw_zone(Vector2i(col, lane), font, text_size, next_beat)
+	for e: Enemy in rules.enemies:
+		if e is BossEnemy and e.is_alive() and e.cell.x in visible_cols:
+			_draw_boss(e, font, text_size)
 	_draw_telegraphs(font, text_size)
 	for e: Enemy in rules.enemies:
-		if e.is_alive() and e.cell.x in visible_cols:
+		if not (e is BossEnemy) and e.is_alive() and e.cell.x in visible_cols:
 			_draw_enemy(e, font, text_size)
 	for h: Hero in rules.heroes:
 		_draw_hero(h, font, text_size, next_beat)
 	_draw_prompts(font, text_size)
+	for e: Enemy in rules.enemies:
+		if e is BossEnemy and e.is_alive():
+			_draw_boss_bar(e, font, text_size)
 
 
 func _draw_zone(cell: Vector2i, font: Font, text_size: int, next_beat: int) -> void:
@@ -165,12 +206,50 @@ func _draw_enemy(e: Enemy, font: Font, text_size: int) -> void:
 	_text_centered(font, label, Rect2(center.x - r.size.x * 0.4, 0, r.size.x * 0.8, 0), center.y + s + text_size + 2.0, text_size - 1, TEXT_COLOR)
 
 
+## The boss's body over its zones: armored plates on intact parts (with a
+## bar for how close each is to breaking), wounds on broken ones.
+func _draw_boss(boss: BossEnemy, font: Font, text_size: int) -> void:
+	var super_up: bool = boss.is_winding() and boss.current.is_super
+	for c: Vector2i in boss.footprint:
+		var r: Rect2 = cell_rect(c)
+		draw_rect(r, SUPER_FILL if super_up else BOSS_BODY)
+		var part: BossPart = boss.part_at(c)
+		var label: String = "body"
+		var col: Color = TEXT_COLOR * Color(1, 1, 1, 0.5)
+		if part != null and part.broken:
+			draw_rect(r.grow(-r.size.y * 0.12), BOSS_WOUND)
+			label = "%s WOUND" % part.display_name
+			col = TEXT_COLOR
+		elif part != null:
+			draw_rect(r.grow(-r.size.y * 0.12), BOSS_PLATE)
+			label = part.display_name
+			col = Color(0.1, 0.12, 0.15)
+			var bar := Rect2(r.position.x + 8.0, r.end.y - 14.0, r.size.x - 16.0, 5.0)
+			draw_rect(bar, HP_BACK)
+			draw_rect(Rect2(bar.position, Vector2(bar.size.x * (1.0 - float(part.damage) / part.break_hp), bar.size.y)), BOSS_PLATE.darkened(0.4))
+		_text_centered(font, label, r, r.get_center().y + text_size * 0.35, text_size - 1, col)
+
+
+func _draw_boss_bar(boss: BossEnemy, font: Font, text_size: int) -> void:
+	var w: float = size.x * 0.5
+	var bar := Rect2((size.x - w) * 0.5, 6.0, w, 8.0)
+	draw_rect(bar.grow(1.0), Color(0, 0, 0, 0.6))
+	_hp_bar(bar, boss)
+	var label: String = boss.display_name
+	if boss.is_winding():
+		label += ": " + ("SUPER " if boss.current.is_super else "") + boss.current.display_name
+	_text_centered(font, label, bar, bar.end.y + text_size + 2.0, text_size, TEXT_COLOR)
+
+
 func _draw_hero(h: Hero, font: Font, text_size: int, next_beat: int) -> void:
 	var r: Rect2 = cell_rect(h.cell)
 	var slot: float = 0.22 if h.player == 0 else 0.42
 	var foot := Vector2(r.position.x + r.size.x * slot, r.position.y + r.size.y * 0.78)
 	var unit: float = minf(r.size.x, r.size.y) / 90.0
 	var col: Color = HERO_COLORS[h.player % HERO_COLORS.size()] if h.is_alive() else DEAD_COLOR
+	if h.has_final_strike():
+		col = FINAL_COLOR * Color(1, 1, 1, 0.55 + 0.45 * sin(_time * 8.0))
+	_draw_aura(foot - Vector2(0, 20) * unit, unit, aura_color(h))
 	draw_circle(foot - Vector2(0, 30) * unit, 6.0 * unit, col)
 	draw_rect(Rect2(foot - Vector2(7, 23) * unit, Vector2(14, 23) * unit), col)
 	if h.is_alive() and h.is_braced(next_beat) and h.brace_dir >= 0:
@@ -178,8 +257,18 @@ func _draw_hero(h: Hero, font: Font, text_size: int, next_beat: int) -> void:
 		var shield: Vector2 = foot - Vector2(0, 14) * unit + d * 14.0 * unit
 		draw_line(shield - d.orthogonal() * 10.0 * unit, shield + d.orthogonal() * 10.0 * unit, col.lightened(0.4), 4.0 * unit)
 	_hp_bar(Rect2(foot.x - 18.0 * unit, foot.y - 46.0 * unit, 36.0 * unit, 4.0), h)
-	_text(font, "P%d" % (h.player + 1), foot + Vector2(-7, -50) * unit, text_size - 2, col)
+	_text(font, "P%d  %dg" % [h.player + 1, h.glory], foot + Vector2(-7, -50) * unit, text_size - 2, col)
 	_text(font, hero_tags(h, next_beat), foot + Vector2(-16 * unit, text_size), text_size - 3, TEXT_COLOR)
+
+
+## A soft glow behind a hero: stacked circles fading outward.
+func _draw_aura(center: Vector2, unit: float, color: Color) -> void:
+	if color.a <= 0.0:
+		return
+	var rings: int = 6
+	for i: int in rings:
+		var t: float = float(rings - i) / rings
+		draw_circle(center, (10.0 + 22.0 * t) * unit, color * Color(1, 1, 1, 0.16 * (1.0 - t * 0.6)))
 
 
 func _draw_prompts(font: Font, text_size: int) -> void:

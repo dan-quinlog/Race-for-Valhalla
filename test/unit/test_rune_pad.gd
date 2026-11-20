@@ -36,3 +36,24 @@ func test_button_press_emits_rune() -> void:
 	watch_signals(pad)
 	pad.get_node("%Right").button_down.emit()
 	assert_signal_emitted_with_parameters(pad, "rune_pressed", [Rune.Dir.RIGHT])
+
+
+func test_final_mode_shows_strikes_and_highlights_best() -> void:
+	var labels: Array[String] = ["Throw 30", "Strike 25", "Flurry 60", "Charge 60"]
+	pad.show_pending(Rune.Dir.LEFT)
+	pad.show_final(labels, Rune.Dir.LEFT)
+	assert_eq(pad.pending, CommandReader.NO_RUNE)
+	assert_string_contains(pad.button_text(Rune.Dir.LEFT), "Flurry 60")
+	assert_eq(pad.get_node("%Left").modulate, RunePad.FINAL_BEST_COLOR)
+	assert_eq(pad.get_node("%Up").modulate, RunePad.FINAL_COLOR)
+	pad.clear_final()
+	assert_string_contains(pad.button_text(Rune.Dir.LEFT), "Attack")
+
+
+func test_runes_are_color_coded_and_pending_lights_up() -> void:
+	var fill: Color = pad.get_node("%Left").get_theme_stylebox("normal").bg_color
+	assert_eq(fill, Rune.COLORS[Rune.Dir.LEFT].darkened(RunePad.REST_DARKEN))
+	pad.show_pending(Rune.Dir.LEFT)
+	fill = pad.get_node("%Left").get_theme_stylebox("normal").bg_color
+	assert_eq(fill, Rune.COLORS[Rune.Dir.LEFT].darkened(RunePad.PENDING_DARKEN))
+	assert_eq(pad.fill_color(Rune.Dir.UP), Rune.COLORS[Rune.Dir.UP].darkened(RunePad.REST_DARKEN))

@@ -5,6 +5,11 @@ extends VBoxContainer
 
 signal judged(t: float, grade: BeatJudge.Grade, player: int)
 signal acted(action: RuneAction, player: int)
+## A fallen player's final strike rune, accepted on their final beat.
+signal final_struck(dir: Rune.Dir, beat: int, perfect: bool, blessed: bool, player: int)
+## The pending first rune changed: a Rune.Dir, or CommandReader.NO_RUNE once
+## the command completes or is cleared. Drives the hero's aura.
+signal pending_changed(rune: int, player: int)
 
 const LOG_LENGTH: int = 5
 
@@ -36,6 +41,8 @@ func configure(period: float, window: float, perfect_window: float) -> void:
 		rhythm.configure(period, window, perfect_window)
 	log_lines.clear()
 	_pad.clear_pending()
+	_pad.clear_final()
+	pending_changed.emit(CommandReader.NO_RUNE, player_index)
 	_judgment.text = "Press on the beat"
 	_action.text = ""
 	_refresh()
@@ -45,15 +52,69 @@ func set_key_hints(hints: Array[String]) -> void:
 	_pad.set_key_hints(hints)
 
 
+## Labels like "Throw 30" for each final strike, and the strongest one.
+static func final_labels(damage: Array[int]) -> Array[String]:
+	var out: Array[String] = []
+	for d: Rune.Dir in Rune.ALL:
+		out.append("%s %d" % [StageRules.FINAL_NAMES[d], damage[d]])
+	return out
+
+
+static func best_final(damage: Array[int]) -> int:
+	var best: int = Rune.Dir.DOWN
+	for d: Rune.Dir in Rune.ALL:
+		if damage[d] > damage[best]:
+			best = d
+	return best
+
+
+## The hero fell. The pad shows the final strikes with their damage until
+## the final beat.
+func begin_final(final_beat: int, damage: Array[int]) -> void:
+	rhythm.begin_final(final_beat)
+	pending_changed.emit(CommandReader.NO_RUNE, player_index)
+	update_final(damage)
+	_action.text = "FALLEN! Final strike in %d" % StageRules.SILENT_BEATS
+	_judgment.text = "Your heart falls silent..."
+
+
+func update_final(damage: Array[int]) -> void:
+	if rhythm.final_beat != Hero.NONE:
+		_pad.show_final(final_labels(damage), best_final(damage))
+
+
+func end_final() -> void:
+	rhythm.mark_fallen()
+	_pad.clear_final()
+	_action.text = "Fallen. Valhalla awaits."
+
+
+## For a hero who starts a stage already fallen.
+func mark_fallen() -> void:
+	rhythm.mark_fallen()
+	_pad.clear_final()
+	pending_changed.emit(CommandReader.NO_RUNE, player_index)
+	_action.text = "Fallen. Valhalla awaits."
+
+
 func submit(rune: Rune.Dir, t: float) -> PlayerRhythm.Result:
 	var r: PlayerRhythm.Result = rhythm.submit(rune, t)
 	_pad.flash(rune, r.judgment.grade)
+	if rhythm.fallen:
+		if r.final_dir >= 0:
+			_judgment.text = describe(r.judgment)
+			_action.text = "Final %s!" % StageRules.FINAL_NAMES[r.final_dir]
+			final_struck.emit(r.final_dir as Rune.Dir, r.judgment.beat, r.final_perfect, r.final_blessed, player_index)
+		judged.emit(t, r.judgment.grade, player_index)
+		return r
 	_judgment.text = describe(r.judgment)
 	if r.started_command:
 		_pad.show_pending(rune)
 		_action.text = "%s..." % Rune.ROLES[rune]
+		pending_changed.emit(rune, player_index)
 	elif r.action != null:
 		_pad.clear_pending()
+		pending_changed.emit(CommandReader.NO_RUNE, player_index)
 		_action.text = r.action.describe()
 		log_lines.push_front(_action.text)
 		if log_lines.size() > LOG_LENGTH:
@@ -65,9 +126,25 @@ func submit(rune: Rune.Dir, t: float) -> PlayerRhythm.Result:
 
 
 func on_beat(beat: int) -> void:
+	if rhythm != null and rhythm.final_beat != Hero.NONE:
+		var left: int = rhythm.final_beat - beat
+		_action.text = "FINAL STRIKE NOW!" if left == 0 else "FALLEN! Final strike in %d" % left
+		return
 	if rhythm != null and rhythm.reader.on_beat(beat):
-		_pad.clear_pending()
-		_action.text = "Beat skipped: rune cleared, combo kept"
+		_clear_skipped()
+
+
+## Beat `index`'s input window closed. If it was the follow-up beat and no
+## rune came, the queue clears right away.
+func on_beat_closed(index: int) -> void:
+	if rhythm != null and not rhythm.fallen and rhythm.reader.on_beat_closed(index):
+		_clear_skipped()
+
+
+func _clear_skipped() -> void:
+	_pad.clear_pending()
+	_action.text = "Beat skipped: queue cleared, combo kept"
+	pending_changed.emit(CommandReader.NO_RUNE, player_index)
 
 
 static func describe(j: BeatJudge.Judgment) -> String:

@@ -26,6 +26,7 @@ func _ready() -> void:
 		p.clock = _clock
 		p.judged.connect(_on_judged)
 	_clock.beat.connect(_on_beat)
+	_clock.beat_closed.connect(_on_beat_closed)
 	for box: SpinBox in [_bpm, _window_ms, _perfect_ms, _latency_ms]:
 		box.value_changed.connect(_on_setting_changed)
 	%RestartButton.pressed.connect(restart)
@@ -91,6 +92,11 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_beat(index: int) -> void:
 	for p: PlayerPanel in panels:
 		p.on_beat(index)
+
+
+func _on_beat_closed(index: int) -> void:
+	for p: PlayerPanel in panels:
+		p.on_beat_closed(index)
 
 
 func _on_judged(t: float, grade: BeatJudge.Grade, player: int) -> void:

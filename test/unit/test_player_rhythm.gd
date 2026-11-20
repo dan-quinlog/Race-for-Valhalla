@@ -56,3 +56,28 @@ func test_configure_resets_state() -> void:
 	assert_eq(player.reader.pending, CommandReader.NO_RUNE)
 	assert_eq(player.combo.combo, 0)
 	assert_almost_eq(player.judge.period, 0.5, 0.0001)
+
+
+func test_fallen_runes_are_ignored_except_on_the_final_beat() -> void:
+	player.submit(Rune.Dir.UP, PERIOD * 1)
+	player.submit(Rune.Dir.LEFT, PERIOD * 2)  # prayer: bless Attack
+	assert_true(player.reader.blessings[Rune.Dir.LEFT])
+	var combo_before: int = player.combo.combo
+	player.begin_final(6)
+	var silent: PlayerRhythm.Result = player.submit(Rune.Dir.RIGHT, PERIOD * 5)
+	assert_eq(silent.final_dir, -1)
+	assert_null(silent.action)
+	assert_eq(player.combo.combo, combo_before, "fallen inputs don't touch combo")
+	var final: PlayerRhythm.Result = player.submit(Rune.Dir.RIGHT, PERIOD * 6)
+	assert_eq(final.final_dir, Rune.Dir.RIGHT)
+	assert_true(final.final_perfect)
+	assert_true(final.final_blessed, "spends the Attack blessing")
+	assert_false(player.reader.blessings[Rune.Dir.LEFT])
+	assert_eq(player.final_beat, Hero.NONE)
+	assert_eq(player.submit(Rune.Dir.UP, PERIOD * 7).final_dir, -1, "only one final strike")
+
+
+func test_missed_final_beat_gives_no_strike() -> void:
+	player.begin_final(6)
+	assert_eq(player.submit(Rune.Dir.UP, PERIOD * 6.5).final_dir, -1)
+	assert_eq(player.final_beat, 6, "the stage defaults to Strike when the beat closes")

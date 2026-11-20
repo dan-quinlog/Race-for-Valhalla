@@ -20,6 +20,15 @@ var ward_until: int = NONE
 var exposed: bool = false
 ## Made a Defensive attack: the next hit taken is halved.
 var guarded: bool = false
+## Glory earned this run: prayers, kills and broken boss parts.
+var glory: int = 0
+## After falling: the beat of the hero's final strike, or NONE (alive, or
+## the strike is spent).
+var final_beat: int = NONE
+
+
+func has_final_strike() -> bool:
+	return final_beat != NONE
 
 
 func _init(p_player: int, p_max_hp: int, p_cell: Vector2i) -> void:
