@@ -204,7 +204,8 @@ func act(player: int, action: RuneAction) -> String:
 	var hero: Hero = heroes[player]
 	if not hero.is_alive():
 		return ""
-	hero.exposed = false
+	hero.exposed_commands = maxi(0, hero.exposed_commands - 1)
+	hero.exposed = hero.exposed_commands > 0
 	var text: String = ""
 	match action.kind:
 		RuneAction.Kind.MOVE:
@@ -217,7 +218,7 @@ func act(player: int, action: RuneAction) -> String:
 			hero.brace_blessed = action.empowered
 			text = "%s braces %s%s" % [hero.display_name, Rune.DIR_NAMES[action.dir], " (retaliating)" if action.empowered else ""]
 		RuneAction.Kind.PRAY:
-			if action.glory > 0:
+			if action.glory > 0 and Oath.prayer_glory_allowed(hero.oath):
 				hero.glory += action.glory
 	# Attacks log themselves, so their result reads before any break or kill.
 	if text != "" and action.kind != RuneAction.Kind.ATTACK:
@@ -241,15 +242,18 @@ func _move(hero: Hero, action: RuneAction) -> String:
 
 func _attack(hero: Hero, action: RuneAction) -> String:
 	var attack_name: String = RuneAction.ATTACK_NAMES[action.attack]
+	var damage: int = attack_damage(action.attack, action.perfect, action.empowered)
 	if action.attack == RuneAction.Attack.HEAVY:
 		hero.exposed = true
+		hero.exposed_commands = Oath.exposed_commands(hero.oath)
+		damage += Oath.heavy_bonus(hero.oath)
 	var foe: Enemy = enemy_at(hero.cell)
 	if foe == null:
 		var miss: String = "%s: %s hits nothing" % [hero.display_name, attack_name]
 		logged.emit(miss)
 		return miss
 	foe.on_struck(action.attack, action.beat)
-	var dealt: int = foe.take_hit(hero.cell, attack_damage(action.attack, action.perfect, action.empowered))
+	var dealt: int = foe.take_hit(hero.cell, damage)
 	var extra: String = ""
 	match action.attack:
 		RuneAction.Attack.TRIP:
@@ -346,6 +350,10 @@ func _hit(hero: Hero, enemy: Enemy, move: EnemyMove, beat: int) -> void:
 		var text: String = "%s blocks %s" % [hero.display_name, move.display_name]
 		if hero.brace_blessed and enemy.is_alive():
 			text += " and strikes back for %d" % enemy.take_damage(RETALIATE_DAMAGE)
+		var heal: int = mini(Oath.block_heal(hero.oath), hero.max_hp - hero.hp)
+		if heal > 0:
+			hero.hp += heal
+			text += " (Tyr heals %d)" % heal
 		logged.emit(text)
 		_check_enemy_dead(enemy, hero)
 		return

@@ -94,6 +94,11 @@ func _build(first: Rune.Dir, second: Rune.Dir) -> RuneAction:
 	if a.kind == RuneAction.Kind.PRAY:
 		if second == Rune.Dir.UP:
 			a.glory = PERFECT_PRAYER_GLORY if _pending_perfect else PRAYER_GLORY
+			if blessings[Rune.Dir.UP]:
+				# A Prayer blessing doubles the glory of the next Prayer + Prayer.
+				a.glory *= 2
+				a.empowered = true
+				blessings[Rune.Dir.UP] = false
 			glory += a.glory
 		else:
 			blessings[second] = true
