@@ -168,3 +168,32 @@ func test_view_splits_into_four_columns_and_three_lanes() -> void:
 	assert_almost_eq(z.x * StageRules.VIEW_COLS, view.size.x, 0.5)
 	assert_almost_eq(z.y * StageMap.LANES, view.size.y, 0.5)
 	assert_almost_eq(view.cell_rect(Vector2i(1, 2)).position.x, z.x + StageView.GAP * 0.5, 0.5)
+
+
+func test_first_rune_lights_hero_aura_until_the_command_ends() -> void:
+	var view: StageView = stage.get_node("%StageView")
+	var hero: Hero = stage.rules.heroes[0]
+	stage.panels[0].submit(Rune.Dir.LEFT, _period() * 3)
+	assert_eq(view.auras[0], Rune.Dir.LEFT)
+	assert_eq(view.aura_color(hero).a, 1.0)
+	stage.panels[0].submit(Rune.Dir.LEFT, _period() * 4)
+	assert_eq(view.auras[0], CommandReader.NO_RUNE)
+	view._process(StageView.AURA_FADE)
+	assert_eq(view.aura_color(hero).a, 0.0, "faded back to neutral")
+
+
+func test_skipped_beat_clears_aura() -> void:
+	var view: StageView = stage.get_node("%StageView")
+	stage.panels[0].submit(Rune.Dir.RIGHT, _period() * 3)
+	stage._on_beat_closed(4)
+	assert_eq(view.auras[0], CommandReader.NO_RUNE)
+	assert_eq(stage.panels[0].rhythm.reader.pending, CommandReader.NO_RUNE)
+
+
+func test_fallen_hero_glows_white() -> void:
+	var view: StageView = stage.get_node("%StageView")
+	var hero: Hero = stage.rules.heroes[0]
+	hero.hp = 0
+	var c: Color = view.aura_color(hero)
+	assert_eq([c.r, c.g, c.b], [1.0, 1.0, 1.0])
+	assert_gt(c.a, 0.0)

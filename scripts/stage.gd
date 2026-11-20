@@ -49,6 +49,7 @@ func _ready() -> void:
 		p.clock = _clock
 		p.judged.connect(_on_judged)
 		p.acted.connect(_on_acted)
+		p.pending_changed.connect(_on_pending_changed)
 	_clock.beat.connect(_on_beat)
 	_clock.beat_closed.connect(_on_beat_closed)
 	for p: PlayerPanel in panels:
@@ -153,10 +154,16 @@ func _on_beat(index: int) -> void:
 
 
 func _on_beat_closed(index: int) -> void:
+	for p: PlayerPanel in panels:
+		p.on_beat_closed(index)
 	rules.close_beat(index)
 	for h: Hero in rules.heroes:
 		if h.has_final_strike():
 			panels[h.player].update_final(rules.final_preview(h))
+
+
+func _on_pending_changed(rune: int, player: int) -> void:
+	_view.set_aura(player, rune)
 
 
 func _on_acted(action: RuneAction, player: int) -> void:

@@ -48,3 +48,12 @@ func test_final_mode_shows_strikes_and_highlights_best() -> void:
 	assert_eq(pad.get_node("%Up").modulate, RunePad.FINAL_COLOR)
 	pad.clear_final()
 	assert_string_contains(pad.button_text(Rune.Dir.LEFT), "Attack")
+
+
+func test_runes_are_color_coded_and_pending_lights_up() -> void:
+	var fill: Color = pad.get_node("%Left").get_theme_stylebox("normal").bg_color
+	assert_eq(fill, Rune.COLORS[Rune.Dir.LEFT].darkened(RunePad.REST_DARKEN))
+	pad.show_pending(Rune.Dir.LEFT)
+	fill = pad.get_node("%Left").get_theme_stylebox("normal").bg_color
+	assert_eq(fill, Rune.COLORS[Rune.Dir.LEFT].darkened(RunePad.PENDING_DARKEN))
+	assert_eq(pad.fill_color(Rune.Dir.UP), Rune.COLORS[Rune.Dir.UP].darkened(RunePad.REST_DARKEN))

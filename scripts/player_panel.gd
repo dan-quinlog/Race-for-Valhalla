@@ -7,6 +7,9 @@ signal judged(t: float, grade: BeatJudge.Grade, player: int)
 signal acted(action: RuneAction, player: int)
 ## A fallen player's final strike rune, accepted on their final beat.
 signal final_struck(dir: Rune.Dir, beat: int, perfect: bool, blessed: bool, player: int)
+## The pending first rune changed: a Rune.Dir, or CommandReader.NO_RUNE once
+## the command completes or is cleared. Drives the hero's aura.
+signal pending_changed(rune: int, player: int)
 
 const LOG_LENGTH: int = 5
 
@@ -39,6 +42,7 @@ func configure(period: float, window: float, perfect_window: float) -> void:
 	log_lines.clear()
 	_pad.clear_pending()
 	_pad.clear_final()
+	pending_changed.emit(CommandReader.NO_RUNE, player_index)
 	_judgment.text = "Press on the beat"
 	_action.text = ""
 	_refresh()
@@ -68,6 +72,7 @@ static func best_final(damage: Array[int]) -> int:
 ## the final beat.
 func begin_final(final_beat: int, damage: Array[int]) -> void:
 	rhythm.begin_final(final_beat)
+	pending_changed.emit(CommandReader.NO_RUNE, player_index)
 	update_final(damage)
 	_action.text = "FALLEN! Final strike in %d" % StageRules.SILENT_BEATS
 	_judgment.text = "Your heart falls silent..."
@@ -88,6 +93,7 @@ func end_final() -> void:
 func mark_fallen() -> void:
 	rhythm.mark_fallen()
 	_pad.clear_final()
+	pending_changed.emit(CommandReader.NO_RUNE, player_index)
 	_action.text = "Fallen. Valhalla awaits."
 
 
@@ -105,8 +111,10 @@ func submit(rune: Rune.Dir, t: float) -> PlayerRhythm.Result:
 	if r.started_command:
 		_pad.show_pending(rune)
 		_action.text = "%s..." % Rune.ROLES[rune]
+		pending_changed.emit(rune, player_index)
 	elif r.action != null:
 		_pad.clear_pending()
+		pending_changed.emit(CommandReader.NO_RUNE, player_index)
 		_action.text = r.action.describe()
 		log_lines.push_front(_action.text)
 		if log_lines.size() > LOG_LENGTH:
@@ -123,8 +131,20 @@ func on_beat(beat: int) -> void:
 		_action.text = "FINAL STRIKE NOW!" if left == 0 else "FALLEN! Final strike in %d" % left
 		return
 	if rhythm != null and rhythm.reader.on_beat(beat):
-		_pad.clear_pending()
-		_action.text = "Beat skipped: rune cleared, combo kept"
+		_clear_skipped()
+
+
+## Beat `index`'s input window closed. If it was the follow-up beat and no
+## rune came, the queue clears right away.
+func on_beat_closed(index: int) -> void:
+	if rhythm != null and not rhythm.fallen and rhythm.reader.on_beat_closed(index):
+		_clear_skipped()
+
+
+func _clear_skipped() -> void:
+	_pad.clear_pending()
+	_action.text = "Beat skipped: queue cleared, combo kept"
+	pending_changed.emit(CommandReader.NO_RUNE, player_index)
 
 
 static func describe(j: BeatJudge.Judgment) -> String:

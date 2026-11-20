@@ -9,6 +9,13 @@ const ALL: Array[Dir] = [Dir.UP, Dir.DOWN, Dir.LEFT, Dir.RIGHT]
 const NAMES: Array[String] = ["Ansuz", "Raidho", "Tiwaz", "Algiz"]
 const ROLES: Array[String] = ["Prayer", "Movement", "Attack", "Defense"]
 const DIR_NAMES: Array[String] = ["up", "down", "left", "right"]
+## Color code per rune: Prayer gold, Movement green, Attack red, Defense blue.
+const COLORS: Array[Color] = [
+	Color(1.0, 0.82, 0.2),
+	Color(0.3, 0.8, 0.4),
+	Color(0.92, 0.25, 0.2),
+	Color(0.3, 0.55, 1.0),
+]
 ## Input action suffixes, e.g. "p1_up".
 const ACTION_SUFFIXES: Array[String] = ["up", "down", "left", "right"]
 

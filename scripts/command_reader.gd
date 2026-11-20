@@ -3,8 +3,9 @@ extends RefCounted
 ## Turns accepted runes into two-beat RuneActions.
 ##
 ## The first rune is held as pending. The second must land on the very next
-## beat. If a beat passes empty, the pending rune expires, and a later rune
-## starts a fresh command. Works on beat indices, not seconds, so tempo
+## beat. If that beat closes without a rune (a skipped beat), the pending
+## rune is cleared, and a later rune starts a fresh command.  Skipping a beat
+## is how a player resets a half-finished command. Works on beat indices, not seconds, so tempo
 ## changes don't affect it.
 
 const NO_RUNE: int = -1
@@ -39,13 +40,19 @@ func feed(rune: Rune.Dir, beat: int, perfect: bool) -> RuneAction:
 	return action
 
 
-## Call on each new beat. Returns true if the pending rune just expired
-## (its follow-up beat has passed).
-func on_beat(beat: int) -> bool:
-	if pending != NO_RUNE and beat >= pending_beat + 2:
+## Call when beat `closed`'s input window shuts. Returns true if that was
+## the follow-up beat and it passed empty, which clears the pending rune.
+func on_beat_closed(closed: int) -> bool:
+	if pending != NO_RUNE and closed >= pending_beat + 1:
 		pending = NO_RUNE
 		return true
 	return false
+
+
+## Backstop for callers without beat_closed: clears a pending rune once its
+## follow-up beat is over. Returns true if it cleared one.
+func on_beat(beat: int) -> bool:
+	return on_beat_closed(beat - 1)
 
 
 func reset() -> void:

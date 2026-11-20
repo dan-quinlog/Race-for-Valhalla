@@ -46,7 +46,27 @@ func test_skipped_beat_drops_pending_command() -> void:
 	panel.submit(Rune.Dir.RIGHT, PERIOD)
 	panel.on_beat(3)
 	assert_eq(panel.get_node("%RunePad").pending, CommandReader.NO_RUNE)
-	assert_string_contains(_label("ActionLabel"), "rune cleared")
+	assert_string_contains(_label("ActionLabel"), "queue cleared")
+
+
+func test_skipped_beat_clears_queue_as_soon_as_it_closes() -> void:
+	watch_signals(panel)
+	panel.submit(Rune.Dir.RIGHT, PERIOD * 4)
+	assert_signal_emitted_with_parameters(panel, "pending_changed", [Rune.Dir.RIGHT, 0])
+	panel.on_beat_closed(4)
+	assert_eq(panel.get_node("%RunePad").pending, Rune.Dir.RIGHT)
+	panel.on_beat_closed(5)
+	assert_eq(panel.get_node("%RunePad").pending, CommandReader.NO_RUNE)
+	assert_string_contains(_label("ActionLabel"), "queue cleared")
+	assert_signal_emitted_with_parameters(panel, "pending_changed", [CommandReader.NO_RUNE, 0])
+	assert_true(panel.submit(Rune.Dir.LEFT, PERIOD * 6).started_command, "a fresh command")
+
+
+func test_completed_command_clears_pending_signal() -> void:
+	panel.submit(Rune.Dir.DOWN, PERIOD)
+	watch_signals(panel)
+	panel.submit(Rune.Dir.LEFT, PERIOD * 2)
+	assert_signal_emitted_with_parameters(panel, "pending_changed", [CommandReader.NO_RUNE, 0])
 
 
 func test_log_is_capped() -> void:

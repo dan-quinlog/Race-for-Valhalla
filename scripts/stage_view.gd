@@ -5,6 +5,8 @@ extends Control
 ## traps and their countdown, the exit door, telegraphed enemy targets with
 ## countdowns, enemies, a boss's parts and wounds, heroes (and fallen
 ## heroes awaiting their final strike), and the lock / GO prompts.
+## A hero glows with their pending rune's color from the first beat of a
+## command until the second, and glows white once fallen.
 ## Placeholder shapes until real sprites exist.
 
 const SCROLL_SPEED: float = 6.0
@@ -28,6 +30,9 @@ const BOSS_BODY := Color(0.35, 0.5, 0.6, 0.55)
 const BOSS_PLATE := Color(0.6, 0.72, 0.8, 0.85)
 const BOSS_WOUND := Color(0.6, 0.05, 0.08, 0.85)
 const FINAL_COLOR := Color(1, 1, 1)
+## Seconds a rune aura takes to fade back to neutral once its command ends.
+const AURA_FADE: float = 0.3
+const DEATH_AURA := Color(1, 1, 1)
 const HERO_COLORS: Array[Color] = [Color(0.45, 0.7, 1.0), Color(1.0, 0.65, 0.3)]
 const DEAD_COLOR := Color(0.35, 0.35, 0.35)
 const HP_BACK := Color(0.15, 0.05, 0.05)
@@ -45,6 +50,28 @@ var rules: StageRules:
 var display_col: float = 0.0
 
 var _time: float = 0.0
+## Per player: Rune.Dir of the pending rune lighting the hero, or NO_RUNE.
+var auras: Array[int] = [CommandReader.NO_RUNE, CommandReader.NO_RUNE]
+## Per player: the last aura color and how much of it is still showing (0-1).
+var _aura_colors: Array[Color] = [Color.WHITE, Color.WHITE]
+var _aura_strength: Array[float] = [0.0, 0.0]
+
+
+## Lights player `player`'s hero with rune `rune`'s color, or fades it back
+## to neutral for NO_RUNE.
+func set_aura(player: int, rune: int) -> void:
+	auras[player] = rune
+	if rune != CommandReader.NO_RUNE:
+		_aura_colors[player] = Rune.COLORS[rune]
+		_aura_strength[player] = 1.0
+	queue_redraw()
+
+
+## The aura behind a hero right now (alpha 0 means none).
+func aura_color(h: Hero) -> Color:
+	if not h.is_alive():
+		return DEATH_AURA * Color(1, 1, 1, 0.6 + 0.25 * sin(_time * 3.0))
+	return _aura_colors[h.player] * Color(1, 1, 1, _aura_strength[h.player])
 
 
 func zone_size() -> Vector2:
@@ -78,6 +105,9 @@ static func hero_tags(hero: Hero, beat: int) -> String:
 
 func _process(delta: float) -> void:
 	_time += delta
+	for p: int in auras.size():
+		if auras[p] == CommandReader.NO_RUNE and _aura_strength[p] > 0.0:
+			_aura_strength[p] = maxf(0.0, _aura_strength[p] - delta / AURA_FADE)
 	if rules != null:
 		display_col = move_toward(display_col, rules.camera_col, delta * SCROLL_SPEED * maxf(1.0, rules.camera_col - display_col))
 	queue_redraw()
@@ -219,6 +249,7 @@ func _draw_hero(h: Hero, font: Font, text_size: int, next_beat: int) -> void:
 	var col: Color = HERO_COLORS[h.player % HERO_COLORS.size()] if h.is_alive() else DEAD_COLOR
 	if h.has_final_strike():
 		col = FINAL_COLOR * Color(1, 1, 1, 0.55 + 0.45 * sin(_time * 8.0))
+	_draw_aura(foot - Vector2(0, 20) * unit, unit, aura_color(h))
 	draw_circle(foot - Vector2(0, 30) * unit, 6.0 * unit, col)
 	draw_rect(Rect2(foot - Vector2(7, 23) * unit, Vector2(14, 23) * unit), col)
 	if h.is_alive() and h.is_braced(next_beat) and h.brace_dir >= 0:
@@ -228,6 +259,16 @@ func _draw_hero(h: Hero, font: Font, text_size: int, next_beat: int) -> void:
 	_hp_bar(Rect2(foot.x - 18.0 * unit, foot.y - 46.0 * unit, 36.0 * unit, 4.0), h)
 	_text(font, "P%d  %dg" % [h.player + 1, h.glory], foot + Vector2(-7, -50) * unit, text_size - 2, col)
 	_text(font, hero_tags(h, next_beat), foot + Vector2(-16 * unit, text_size), text_size - 3, TEXT_COLOR)
+
+
+## A soft glow behind a hero: stacked circles fading outward.
+func _draw_aura(center: Vector2, unit: float, color: Color) -> void:
+	if color.a <= 0.0:
+		return
+	var rings: int = 6
+	for i: int in rings:
+		var t: float = float(rings - i) / rings
+		draw_circle(center, (10.0 + 22.0 * t) * unit, color * Color(1, 1, 1, 0.16 * (1.0 - t * 0.6)))
 
 
 func _draw_prompts(font: Font, text_size: int) -> void:
