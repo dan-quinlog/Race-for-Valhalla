@@ -76,6 +76,18 @@ func broken_parts() -> int:
 	return 0
 
 
+## Called just before a hero's blow lands, with its RuneAction.Attack (-1 for
+## a final strike) and beat. Lets a foe react, e.g. a shield knocked aside.
+func on_struck(_attack: int, _beat: int) -> void:
+	pass
+
+
+## Called when the current move lands, before finish(). Lets a foe follow
+## through, e.g. a wolf leaping into the zone it pounced on.
+func landed(_stage: StageRules) -> void:
+	pass
+
+
 ## Beats left until the current move lands, counted from the last closed beat.
 func countdown(closed_beat: int) -> int:
 	return hit_beat - closed_beat if is_winding() else 0

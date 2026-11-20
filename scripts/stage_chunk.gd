@@ -10,12 +10,13 @@ extends Resource
 ##   F  fire trap zone (every F in a column burns together)
 ##   D  exit door
 ##   1  player 1 start, 2 player 2 start
-##   B  brute enemy, R  ranger enemy
+##   B  brute enemy (Draugr), R  ranger enemy (Archer)
+##   V  Varg (wolf), S  Shield-thrall
 ##   J  Jötunn boss (its top-left zone; it covers 2 columns by 3 lanes, so
 ##      leave the rest of that block open)
 
 const LANES: int = 3
-const ZONE_CHARS: String = ".#FD12BRJ"
+const ZONE_CHARS: String = ".#FD12BRJVS"
 
 ## Lane strings, back lane (top of the screen) first. All the same length.
 @export var rows: PackedStringArray = PackedStringArray(["", "", ""])

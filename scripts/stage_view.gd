@@ -26,6 +26,9 @@ const SUPER_FILL := Color(0.6, 0.2, 0.9, 0.25)
 const BRUTE_COLOR := Color(0.45, 0.55, 0.5)
 const RANGER_COLOR := Color(0.55, 0.5, 0.35)
 const PATTERN_COLOR := Color(0.4, 0.5, 0.45)
+const VARG_COLOR := Color(0.55, 0.55, 0.6)
+const THRALL_COLOR := Color(0.5, 0.42, 0.35)
+const SHIELD_COLOR := Color(0.75, 0.6, 0.3)
 const BOSS_BODY := Color(0.35, 0.5, 0.6, 0.55)
 const BOSS_PLATE := Color(0.6, 0.72, 0.8, 0.85)
 const BOSS_WOUND := Color(0.6, 0.05, 0.08, 0.85)
@@ -197,10 +200,24 @@ func _draw_enemy(e: Enemy, font: Font, text_size: int) -> void:
 		draw_colored_polygon(PackedVector2Array([center + Vector2(-s, 0), center + Vector2(s * 0.6, -s), center + Vector2(s * 0.6, s)]), RANGER_COLOR)
 	elif e is BruteEnemy:
 		draw_rect(Rect2(center - Vector2(s, s), Vector2(s, s) * 2.0), BRUTE_COLOR)
+	elif e is VargEnemy:
+		# A low, long wolf shape with ears.
+		draw_rect(Rect2(center + Vector2(-s * 1.1, -s * 0.2), Vector2(s * 2.2, s * 0.8)), VARG_COLOR)
+		draw_colored_polygon(PackedVector2Array([center + Vector2(-s * 1.1, -s * 0.2), center + Vector2(-s * 0.8, -s * 0.8), center + Vector2(-s * 0.5, -s * 0.2)]), VARG_COLOR)
+	elif e is ShieldThrallEnemy:
+		draw_rect(Rect2(center - Vector2(s * 0.7, s), Vector2(s * 1.4, s * 2.0)), THRALL_COLOR)
+		var thrall: ShieldThrallEnemy = e
+		if thrall.is_shielded(rules.closed_through + 1):
+			draw_circle(center + Vector2(-s * 0.8, 0), s * 0.75, SHIELD_COLOR)
+			draw_arc(center + Vector2(-s * 0.8, 0), s * 0.75, 0, TAU, 24, SHIELD_COLOR.darkened(0.4), 2.0)
+		else:
+			draw_circle(center + Vector2(-s * 0.4, s * 1.1), s * 0.5, SHIELD_COLOR.darkened(0.5))
 	else:
 		draw_rect(Rect2(center - Vector2(s, s) * 1.2, Vector2(s, s) * 2.4), SUPER_COLOR if super_up else PATTERN_COLOR)
 	_hp_bar(Rect2(center.x - s, center.y - s - 10.0, s * 2.0, 5.0), e)
 	var label: String = e.display_name
+	if e is ShieldThrallEnemy and not (e as ShieldThrallEnemy).is_shielded(rules.closed_through + 1):
+		label += " (OPEN)"
 	if e.is_winding():
 		label = ("SUPER " if super_up else "") + e.current.display_name
 	_text_centered(font, label, Rect2(center.x - r.size.x * 0.4, 0, r.size.x * 0.8, 0), center.y + s + text_size + 2.0, text_size - 1, TEXT_COLOR)

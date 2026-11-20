@@ -96,6 +96,10 @@ static func spawn(kind: String, cell: Vector2i) -> Enemy:
 			return RangerEnemy.new(cell)
 		"J":
 			return BossEnemy.jotunn(cell)
+		"V":
+			return VargEnemy.new(cell)
+		"S":
+			return ShieldThrallEnemy.new(cell)
 		_:
 			return BruteEnemy.new(cell)
 
@@ -244,6 +248,7 @@ func _attack(hero: Hero, action: RuneAction) -> String:
 		var miss: String = "%s: %s hits nothing" % [hero.display_name, attack_name]
 		logged.emit(miss)
 		return miss
+	foe.on_struck(action.attack, action.beat)
 	var dealt: int = foe.take_hit(hero.cell, attack_damage(action.attack, action.perfect, action.empowered))
 	var extra: String = ""
 	match action.attack:
@@ -328,6 +333,8 @@ func _land(enemy: Enemy, beat: int) -> void:
 		_hit(hero, enemy, move, beat)
 		if over:
 			return
+	if enemy.is_alive():
+		enemy.landed(self)
 	enemy.finish(beat)
 
 
@@ -555,6 +562,7 @@ func _final(hero: Hero, dir: Rune.Dir, perfect: bool, blessed: bool) -> String:
 		var foe: Enemy = enemy_at(h[0])
 		if foe == null:
 			continue
+		foe.on_struck(-1, closed_through)
 		total += foe.take_hit(h[0], h[1], h[2])
 		if not struck.has(foe):
 			struck.append(foe)
