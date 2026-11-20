@@ -22,6 +22,9 @@ const ZONE_CHARS: String = ".#FD12BRJVS"
 @export var rows: PackedStringArray = PackedStringArray(["", "", ""])
 ## The camera locks on this chunk until its enemies are cleared.
 @export var encounter: bool = false
+## Difficulty for generated stages (StageGenerator): 1 easy to 3 hard.
+## 0 for chunks that aren't drawn as encounters.
+@export var tier: int = 0
 
 
 static func from_rows(p_rows: Array[String], p_encounter: bool = false) -> StageChunk:

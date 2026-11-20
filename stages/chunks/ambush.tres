@@ -6,3 +6,4 @@
 script = ExtResource("1_chunk")
 rows = PackedStringArray("...R", "..B.", "....")
 encounter = true
+tier = 1

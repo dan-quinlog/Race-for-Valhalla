@@ -1,9 +1,11 @@
 extends Control
-## A run of stages: one or two heroes fight through encounters and past
-## hazards on a 3-lane grid to the exit door, which leads on to the next
-## stage (here, the Jötunn's arena). Each layout is stitched from StageChunk
-## resources. Health and glory carry over between stages.
+## Plays a DrengRun: one or two heroes fight through generated stages of
+## encounters and hazards on a 3-lane grid to each exit door, rest between
+## stages, and face the Jötunn at the end. Health and glory carry over.
 ## A fallen hero's pad shows their final strikes until their final beat.
+## When the run ends, a lineage run is recorded and saved, and the hall
+## button appears. A quick run (no lineage) keeps the Restart and Boss
+## shortcuts for testing.
 ## Input routing matches the Rhythm Lab: P1 is WASD and gamepad 1, P2 the
 ## arrow keys and gamepad 2, and solo mode sends every input set to P1.
 
@@ -12,25 +14,16 @@ const WINDOW: float = 0.15
 const PERFECT_WINDOW: float = 0.04
 const LOG_LENGTH: int = 6
 const LAB_SCENE: String = "res://scenes/rhythm_lab.tscn"
-const FIRST_STAGE: Array[StageChunk] = [
-	preload("res://stages/chunks/start.tres"),
-	preload("res://stages/chunks/ambush.tres"),
-	preload("res://stages/chunks/fire_gate.tres"),
-]
-const BOSS_ARENA: Array[StageChunk] = [preload("res://stages/chunks/jotunn_arena.tres")]
-const STAGES: Array = [FIRST_STAGE, BOSS_ARENA]
-const STAGE_BANNERS: Array[String] = [
-	"Fight your way to the exit door!",
-	"The Jötunn! Break its parts for glory, or strike its body to live.",
-]
+const HALL_SCENE: String = "res://scenes/hall.tscn"
 ## Seconds between clearing a stage and entering the next.
-const NEXT_STAGE_DELAY: float = 2.0
+const NEXT_STAGE_DELAY: float = 3.0
 
 const KEY_HINTS_P1: Array[String] = ["W", "S", "A", "D"]
 const KEY_HINTS_P2: Array[String] = ["↑", "↓", "←", "→"]
 const KEY_HINTS_SOLO: Array[String] = ["W / ↑", "S / ↓", "A / ←", "D / →"]
 
 var two_players: bool = false
+var run: DrengRun
 var stage_index: int = 0
 var rules: StageRules
 var log_lines: Array[String] = []
@@ -41,22 +34,29 @@ var log_lines: Array[String] = []
 @onready var _banner: Label = %Banner
 @onready var _stage_log: Label = %StageLog
 @onready var _two_players_toggle: CheckButton = %TwoPlayers
+@onready var _hall_button: Button = %HallButton
 @onready var panels: Array[PlayerPanel] = [%Player1, %Player2]
 
 
 func _ready() -> void:
+	# Take the run the hall set up (a quick run if there is none), once.
+	run = DrengRun.current if DrengRun.current != null else DrengRun.new(null, randi())
+	DrengRun.current = null
 	for p: PlayerPanel in panels:
 		p.clock = _clock
 		p.judged.connect(_on_judged)
 		p.acted.connect(_on_acted)
 		p.pending_changed.connect(_on_pending_changed)
+		p.final_struck.connect(_on_final_input)
 	_clock.beat.connect(_on_beat)
 	_clock.beat_closed.connect(_on_beat_closed)
-	for p: PlayerPanel in panels:
-		p.final_struck.connect(_on_final_input)
 	%RestartButton.pressed.connect(restart)
-	%BossButton.pressed.connect(start_stage.bind(STAGES.size() - 1))
+	%BossButton.pressed.connect(start_boss)
 	%LabButton.pressed.connect(open_lab)
+	_hall_button.pressed.connect(open_hall)
+	var quick: bool = run.lineage == null
+	%RestartButton.visible = quick
+	%BossButton.visible = quick
 	_two_players_toggle.toggled.connect(set_two_players)
 	_two_players_toggle.visible = not OS.has_feature("mobile")
 	set_two_players(false)
@@ -71,9 +71,18 @@ func start_stage(index: int) -> void:
 	_load_stage(index, [])
 
 
-## Moves on to the next stage, carrying the heroes over.
+## Jumps straight to the boss with fresh heroes (a testing shortcut).
+func start_boss() -> void:
+	start_stage(DrengRun.STAGE_COUNT)
+
+
+## Rests (heals living heroes REST_HEAL) and moves on to the next stage,
+## carrying the heroes over.
 func advance_stage() -> void:
-	if stage_index + 1 < STAGES.size():
+	if stage_index + 1 < run.stage_count():
+		for h: Hero in rules.heroes:
+			if h.is_alive():
+				h.hp = mini(h.max_hp, h.hp + DrengRun.REST_HEAL)
 		_load_stage(stage_index + 1, rules.heroes)
 
 
@@ -87,11 +96,18 @@ func _load_stage(index: int, carry: Array[Hero]) -> void:
 	for p: PlayerPanel in panels:
 		p.configure(_clock.period, WINDOW, PERFECT_WINDOW)
 	_ekg.configure(_clock.period, WINDOW, WINDOW, PERFECT_WINDOW)
-	var chunks: Array[StageChunk] = []
-	chunks.assign(STAGES[index])
-	rules = StageRules.new(StageMap.build(chunks), 2 if two_players else 1)
+	rules = StageRules.new(StageMap.build(run.stage_chunks(index)), 2 if two_players else 1)
+	var oath: int = run.oath()
+	for h: Hero in rules.heroes:
+		h.display_name = run.hero_names[h.player]
+		h.oath = oath
+		h.max_hp = Oath.max_hp(oath)
+		h.hp = h.max_hp
+		panels[h.player].set_title("P%d: %s" % [h.player + 1, h.display_name])
+		if Oath.starts_with_prayer_blessing(oath):
+			panels[h.player].bless(Rune.Dir.UP)
 	for i: int in mini(carry.size(), rules.heroes.size()):
-		rules.heroes[i].hp = carry[i].hp
+		rules.heroes[i].hp = mini(carry[i].hp, rules.heroes[i].max_hp)
 		rules.heroes[i].glory = carry[i].glory
 		if not rules.heroes[i].is_alive():
 			panels[i].mark_fallen()
@@ -103,12 +119,18 @@ func _load_stage(index: int, carry: Array[Hero]) -> void:
 	_view.rules = rules
 	log_lines.clear()
 	_stage_log.text = ""
-	_banner.text = STAGE_BANNERS[index]
+	_banner.text = run.banner(index)
+	_hall_button.visible = run.lineage == null
 
 
 ## Side-effect wrapper so tests can stub out the delay.
 func schedule_next_stage() -> void:
 	get_tree().create_timer(NEXT_STAGE_DELAY).timeout.connect(advance_stage)
+
+
+## Side-effect wrapper so tests can stub out file access.
+func save_lineage() -> void:
+	run.lineage.save_file()
 
 
 func set_two_players(on: bool) -> void:
@@ -128,6 +150,10 @@ func panel_for_input(input_player: int) -> int:
 
 func open_lab() -> void:
 	go_to_scene(LAB_SCENE)
+
+
+func open_hall() -> void:
+	go_to_scene(HALL_SCENE)
 
 
 ## Side-effect wrapper so tests can stub out scene changes.
@@ -199,14 +225,19 @@ func _on_door_opened() -> void:
 
 
 func _on_ended(won: bool) -> void:
-	if won and stage_index + 1 < STAGES.size():
-		_banner.text = "Through the door... something huge stirs ahead."
+	if won and not run.is_boss(stage_index):
+		_banner.text = "Through the door! You rest by the fire (+%d HP) before pressing on..." % DrengRun.REST_HEAL
 		schedule_next_stage()
+		return
+	var glory: Array[String] = []
+	for h: Hero in rules.heroes:
+		glory.append("%s %d" % [h.display_name, h.glory])
+	if won and rules.living_heroes().size() > 0:
+		_banner.text = "The relic of your ancestors is yours! The Dreng arc is complete. Glory: %s" % ", ".join(glory)
 	elif won:
-		var glory: Array[String] = []
-		for h: Hero in rules.heroes:
-			glory.append("P%d %d" % [h.player + 1, h.glory])
-		var how: String = "Victory!" if rules.living_heroes().size() > 0 else "Victory in death! Valhalla opens its doors."
-		_banner.text = "%s Glory: %s" % [how, ", ".join(glory)]
+		_banner.text = "Victory in death! The relic is won and Valhalla opens its doors. Glory: %s" % ", ".join(glory)
 	else:
-		_banner.text = "You have fallen. Press Restart to fight again."
+		_banner.text = "You have fallen in stage %d. Valhalla takes note. Glory: %s" % [stage_index + 1, ", ".join(glory)]
+	if run.record(rules.heroes, won, stage_index):
+		save_lineage()
+	_hall_button.visible = true

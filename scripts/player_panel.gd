@@ -52,6 +52,16 @@ func set_key_hints(hints: Array[String]) -> void:
 	_pad.set_key_hints(hints)
 
 
+func set_title(text: String) -> void:
+	_title.text = text
+
+
+## Grants a blessing on `rune`, as a prayer would.
+func bless(rune: Rune.Dir) -> void:
+	rhythm.reader.blessings[rune] = true
+	_refresh()
+
+
 ## Labels like "Throw 30" for each final strike, and the strongest one.
 static func final_labels(damage: Array[int]) -> Array[String]:
 	var out: Array[String] = []

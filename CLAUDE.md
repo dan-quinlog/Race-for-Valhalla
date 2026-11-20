@@ -9,9 +9,10 @@ A roguelike rhythm game. Viking warriors act on the beat of their own heart, cha
 
 ## Layout
 - `scenes/`, `scripts/` (one script per scene, plus `class_name` helper classes), `test/unit/`.
-- `scenes/stage.tscn` is the main scene: a run of stages (one or two heroes) drawn by `StageView`. The first stage's exit door leads to the Jötunn boss arena, carrying over health and glory. Restart goes back to stage 1, the Boss button jumps straight to the arena, and another button opens the Rhythm Lab.
+- `scenes/hall.tscn` is the main scene, the lineage hall. With no save it shows the Founder screen (name the line, swear an oath). With a save it lists the line's heroes and glory and sends the next hero out on the Dreng arc. It also offers a quick run (no lineage, nothing saved) and the Rhythm Lab.
+- `scenes/stage.tscn` plays a `DrengRun` (one or two heroes) drawn by `StageView`. The hall passes the run through the static `DrengRun.current`, which the stage takes once in `_ready` (a quick run if none). Quick runs keep the Restart and Boss buttons for testing; lineage runs hide them. When a run ends, a lineage run is recorded and saved, and "Return to the hall" appears.
 - `scenes/rhythm_lab.tscn` is the test bench for the heartbeat and rune commands, with tunable BPM, windows and latency. Both scenes hold one or two `player_panel.tscn` (each with a `rune_pad.tscn`).
-- `stages/chunks/*.tres` are `StageChunk` resources: three lane strings (`.` open, `#` wall, `F` fire, `D` door, `1`/`2` starts, `B` brute, `R` ranger, `V` Varg, `S` Shield-thrall, `J` Jötunn boss at its top-left zone) plus an `encounter` flag. `StageMap.build` stitches chunks left to right. Stages are hand-listed for now (`stage.gd` `STAGES`), but are meant to be generated from shuffled chunks later.
+- `stages/chunks/*.tres` are `StageChunk` resources: three lane strings (`.` open, `#` wall, `F` fire, `D` door, `1`/`2` starts, `B` brute, `R` ranger, `V` Varg, `S` Shield-thrall, `J` Jötunn boss at its top-left zone) plus an `encounter` flag and a difficulty `tier` (1–3, 0 for non-encounters). `StageMap.build` stitches chunks left to right. `StageGenerator` builds each stage as start | encounter | corridor | encounter | exit, drawing encounters from tiers n-1..n for stage n, seeded so a run's stages are stable.
 
 ## Core rhythm model
 - `BeatClock` (`scripts/beat_clock.gd`) is the master clock. It is locked to audio playback of a looping, synthesized heartbeat (`HeartbeatAudio`), not to frame time. The buh of beat `n` is at `n * period`.
@@ -49,6 +50,12 @@ A roguelike rhythm game. Viking warriors act on the beat of their own heart, cha
 - **Bosses** (`BossEnemy`) cover several zones (`footprint`) with one health pool. Every hit damages the pool, and a hit on an intact part's zone also wears that `BossPart` down. Hits on bare zones (body, or a broken part) deal +50%, so the body is the safer, lower-glory route. A broken part gives its breaker +10 glory, bleeds the boss 1 HP per beat, and turns its attack slot enraged. A boss that bleeds out earns no one the kill glory.
   - The Jötunn covers 2x3 zones: Club Arm (front top), Head (back top), Legs (back bottom), and three body zones. It cycles Club Slam / Frost Breath / Stomp. Broken parts turn these into Wild Flail / the off-beat Jötunn's Roar super / Quake.
 - **Glory** (`Hero.glory`) comes from prayers (Prayer + Prayer), killing blows (`Enemy.glory_value`; 3 for regular foes, 25 for the boss), part breaks, and final-strike kills (+25 extra).
+- **Dreng arc** (`DrengRun`): 3 generated stages, then the Jötunn, who guards the ancestors' relic. Between stages the heroes rest by the fire (+30 HP, up to max; the fallen stay fallen). Beating the boss completes the arc.
+- **Lineage** (`Lineage`, saved as JSON at `user://lineage.json`): its name, the Founder's oath, and a record per hero (name, arc, glory, fate, stage reached). Each run's heroes get names from the line. Abandoning the line in the hall deletes the save (two presses).
+- **Oaths** (`Oath`, placeholders, applied to every hero of the line via `Hero.oath`):
+  - Odin: start each stage with a Prayer blessing (the next Prayer + Prayer gives double glory), but -10 max HP.
+  - Thor: Heavy +10 damage, but it leaves you exposed for two commands.
+  - Tyr: every block heals 3, but Prayer + Prayer gives no glory.
 - **Final strike:** a hero who falls as beat `n` closes stays silent on `n+1` and `n+2`, and strikes once on `n+3` (`Hero.final_beat`). Fallen runes are ignored except an accepted one on that beat (`PlayerRhythm.begin_final`). With no input, it's a Strike. The stage isn't lost until every pending final strike resolves, so a dead party can still win. Perfect and an unspent Attack blessing each add +50%.
   - Up, Throw (30): the top lane of the nearest boss column (your own column if you stand in the boss), or the nearest foe if there's no boss. Bare-zone bonus applies.
   - Right, Charge (20 per zone): every foe zone ahead in your lane, not your start zone. Bare-zone bonus applies. The body ends at the right edge.

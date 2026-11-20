@@ -1,7 +1,6 @@
 extends GutTest
 
 const StageScene: PackedScene = preload("res://scenes/stage.tscn")
-const StageScript: GDScript = preload("res://scripts/stage.gd")
 
 var stage: Control
 
@@ -30,20 +29,26 @@ func _kill_all() -> void:
 	stage.rules._update_clears()
 
 
-func test_first_stage_chunks_are_valid() -> void:
-	for chunk: StageChunk in StageScript.FIRST_STAGE:
-		assert_eq(chunk.validate(), "")
+## A stage scene playing a lineage run, with saving stubbed out.
+func _lineage_stage(oath: int) -> Control:
+	DrengRun.current = DrengRun.new(Lineage.new("Test Line", oath), 5)
+	var s: Control = partial_double(StageScene).instantiate()
+	stub(s, "go_to_scene").to_do_nothing()
+	stub(s, "schedule_next_stage").to_do_nothing()
+	stub(s, "save_lineage").to_do_nothing()
+	add_child_autofree(s)
+	await wait_process_frames(2)
+	return s
 
 
-func test_first_stage_layout() -> void:
+func test_quick_run_is_generated_with_two_locks_and_a_door() -> void:
+	assert_null(stage.run.lineage)
 	var map: StageMap = stage.rules.map
-	assert_eq(map.width, 9)
 	assert_eq(map.encounters.size(), 2)
 	assert_eq(map.encounters[0].end - StageRules.VIEW_COLS, 1, "one column of scroll to the first lock")
-	assert_eq(map.encounters[1].end - map.encounters[0].end, StageRules.VIEW_COLS, "then a full screen to the second")
-	assert_eq(stage.rules.enemies.size(), 4)
-	assert_eq(stage.rules.fires.size(), 1)
-	assert_eq(map.door, Vector2i(8, 2))
+	assert_eq(map.door, Vector2i(map.width - 1, 1))
+	assert_true(stage.get_node("%RestartButton").visible)
+	assert_true(stage.get_node("%BossButton").visible)
 
 
 func test_starts_solo_with_one_hero() -> void:
@@ -79,35 +84,48 @@ func test_door_opening_updates_banner() -> void:
 
 
 func test_reaching_the_door_clears_the_stage() -> void:
-	stage.rules.camera_col = 5
-	stage.rules.heroes[0].cell = Vector2i(8, 2)
+	var map: StageMap = stage.rules.map
+	stage.rules.camera_col = map.width - StageRules.VIEW_COLS
+	stage.rules.heroes[0].cell = map.door
 	_kill_all()
 	assert_true(stage.rules.won)
-	assert_string_starts_with(stage.get_node("%Banner").text, "Through the door")
+	assert_string_starts_with(stage.get_node("%Banner").text, "Through the door! You rest")
 	assert_called(stage, "schedule_next_stage")
 
 
-func test_next_stage_is_the_boss_and_carries_heroes_over() -> void:
-	stage.rules.heroes[0].hp = 33
+func test_next_stage_rests_and_carries_heroes_over() -> void:
+	stage.rules.heroes[0].hp = 20
 	stage.rules.heroes[0].glory = 7
 	stage.advance_stage()
 	assert_eq(stage.stage_index, 1)
-	assert_true(stage.rules.enemies[0] is BossEnemy)
-	assert_eq(stage.rules.heroes[0].hp, 33)
+	assert_eq(stage.rules.heroes[0].hp, 20 + DrengRun.REST_HEAL)
 	assert_eq(stage.rules.heroes[0].glory, 7)
+	assert_string_starts_with(stage.get_node("%Banner").text, "Stage 2 of 3")
+	stage.rules.heroes[0].hp = 50
+	stage.advance_stage()
+	assert_eq(stage.rules.heroes[0].hp, StageRules.HERO_HP, "rest never heals past max")
+
+
+func test_after_three_stages_comes_the_boss() -> void:
+	for i: int in DrengRun.STAGE_COUNT:
+		stage.advance_stage()
+	assert_eq(stage.stage_index, DrengRun.STAGE_COUNT)
+	assert_true(stage.rules.enemies[0] is BossEnemy)
 	assert_string_contains(stage.get_node("%Banner").text, "Jötunn")
+	stage.advance_stage()
+	assert_eq(stage.stage_index, DrengRun.STAGE_COUNT, "the boss is the last stage")
 
 
 func test_boss_button_starts_the_arena_fresh() -> void:
 	stage.rules.heroes[0].hp = 5
 	stage.get_node("%BossButton").pressed.emit()
-	assert_eq(stage.stage_index, 1)
+	assert_eq(stage.stage_index, DrengRun.STAGE_COUNT)
 	assert_eq(stage.rules.heroes[0].hp, StageRules.HERO_HP)
 	assert_eq(stage.rules.map.width, StageRules.VIEW_COLS, "a single screen")
 
 
 func test_fallen_hero_gets_final_strike_pad_and_ekg_heart() -> void:
-	stage.start_stage(1)
+	stage.start_boss()
 	var hero: Hero = stage.rules.heroes[0]
 	hero.cell = Vector2i(2, 1)
 	hero.hp = 0
@@ -124,7 +142,7 @@ func test_fallen_hero_gets_final_strike_pad_and_ekg_heart() -> void:
 
 
 func test_final_strike_victory_banner() -> void:
-	stage.start_stage(1)
+	stage.start_boss()
 	var hero: Hero = stage.rules.heroes[0]
 	hero.cell = Vector2i(2, 1)
 	stage.rules.enemies[0].hp = 5
@@ -197,3 +215,39 @@ func test_fallen_hero_glows_white() -> void:
 	var c: Color = view.aura_color(hero)
 	assert_eq([c.r, c.g, c.b], [1.0, 1.0, 1.0])
 	assert_gt(c.a, 0.0)
+
+
+func test_lineage_run_applies_the_oath_and_names_heroes() -> void:
+	var s: Control = await _lineage_stage(Oath.Kind.ODIN)
+	var hero: Hero = s.rules.heroes[0]
+	assert_eq(hero.max_hp, StageRules.HERO_HP - Oath.ODIN_HP_COST)
+	assert_eq(hero.hp, hero.max_hp)
+	assert_eq(hero.oath, Oath.Kind.ODIN)
+	assert_eq(hero.display_name, s.run.hero_names[0])
+	assert_true(s.panels[0].rhythm.reader.blessings[Rune.Dir.UP], "Odin's Prayer blessing")
+	assert_false(s.get_node("%RestartButton").visible, "no do-overs in a lineage run")
+	assert_false(s.get_node("%BossButton").visible)
+	assert_false(s.get_node("%HallButton").visible)
+
+
+func test_lineage_run_records_a_fall_and_saves() -> void:
+	var s: Control = await _lineage_stage(Oath.Kind.TYR)
+	s.rules.heroes[0].glory = 9
+	s.rules._end(false)
+	assert_called(s, "save_lineage")
+	assert_eq(s.run.lineage.heroes.size(), 1)
+	assert_eq(s.run.lineage.heroes[0].glory, 9)
+	assert_eq(s.run.lineage.heroes[0].fate, Lineage.Fate.FELL)
+	assert_true(s.get_node("%HallButton").visible)
+	s.get_node("%HallButton").pressed.emit()
+	assert_called(s, "go_to_scene", ["res://scenes/hall.tscn"])
+
+
+func test_beating_the_boss_completes_the_dreng_arc() -> void:
+	var s: Control = await _lineage_stage(Oath.Kind.THOR)
+	s.start_boss()
+	s.rules._end(true)
+	assert_string_contains(s.get_node("%Banner").text, "Dreng arc is complete")
+	assert_eq(s.run.lineage.heroes[0].fate, Lineage.Fate.COMPLETED_DRENG)
+	s.rules.ended.emit(true)
+	assert_eq(s.run.lineage.heroes.size(), 1, "recorded once")

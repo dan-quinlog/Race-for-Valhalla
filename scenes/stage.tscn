@@ -96,6 +96,12 @@ layout_mode = 2
 focus_mode = 0
 text = "Rhythm Lab"
 
+[node name="HallButton" type="Button" parent="Margin/Layout/Controls"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Return to the hall"
+
 [node name="Bottom" type="HBoxContainer" parent="Margin/Layout"]
 layout_mode = 2
 theme_override_constants/separation = 24
