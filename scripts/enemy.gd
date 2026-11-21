@@ -11,10 +11,20 @@ extends Combatant
 ## and the enemy stays off the beat until a Trip (or another super) shifts
 ## it back. A stagger pushes the pending hit, or the next step, back a beat.
 ## Everything is on beat indices.
+##
+## "The beat" is the odd beats as a player counts them (1st, 3rd, 5th...),
+## shown by purple zone borders. Beat indices start at 0, so that is index
+## parity ON_BEAT (0). Every enemy spawns on the beat, so its steps start
+## and its hits land on purple beats. It is only set at spawn. Once a super
+## or a Trip shifts an enemy onto the green (even) beats, nothing puts it
+## back except another shift.
 
 const NONE: int = -(1 << 62)
 ## Beats per step of the enemy's rhythm.
 const CADENCE: int = 2
+## Index parity of "the beat": indices 0, 2, 4... are the player's odd
+## (purple) beats 1, 3, 5...
+const ON_BEAT: int = 0
 
 ## The move winding up, or null between moves.
 var current: EnemyMove
@@ -24,8 +34,8 @@ var targets: Array[Vector2i] = []
 var hit_beat: int = NONE
 ## First beat the next step may happen on.
 var next_start: int = 0
-## Beat parity the enemy's rhythm is on: 0 is on the beat, 1 is off it.
-var phase: int = 0
+## Beat parity the enemy's rhythm is on. ON_BEAT (odd) is on the beat.
+var phase: int = ON_BEAT
 ## Index into the stage's encounters, or -1.
 var encounter: int = -1
 ## Glory for the hero who lands the killing blow.
@@ -37,21 +47,21 @@ var _hero_cursor: int = 0
 func _init(p_name: String, p_max_hp: int, p_cell: Vector2i, first_start: int = 0) -> void:
 	super(p_name, p_max_hp, p_cell)
 	next_start = first_start
-	phase = posmod(first_start, CADENCE)
+	phase = ON_BEAT
 
 
 func is_winding() -> bool:
 	return current != null
 
 
-## True while the current move will land off the beat (on an odd beat).
+## True while the current move will land off the beat (on a green beat).
 func is_off_beat() -> bool:
-	return is_winding() and posmod(hit_beat, CADENCE) != 0
+	return is_winding() and posmod(hit_beat, CADENCE) != ON_BEAT
 
 
 ## True while the enemy's rhythm is shifted off the beat.
 func is_rhythm_off_beat() -> bool:
-	return phase != 0
+	return phase != ON_BEAT
 
 
 ## True if the enemy stands in `c`. Bosses cover several zones.
@@ -74,6 +84,18 @@ func is_unarmored(_c: Vector2i) -> bool:
 ## Broken boss parts (0 for ordinary enemies).
 func broken_parts() -> int:
 	return 0
+
+
+## Called just before a hero's blow lands, with its RuneAction.Attack (-1 for
+## a final strike) and beat. Lets a foe react, e.g. a shield knocked aside.
+func on_struck(_attack: int, _beat: int) -> void:
+	pass
+
+
+## Called when the current move lands, before finish(). Lets a foe follow
+## through, e.g. a wolf leaping into the zone it pounced on.
+func landed(_stage: StageRules) -> void:
+	pass
 
 
 ## Beats left until the current move lands, counted from the last closed beat.

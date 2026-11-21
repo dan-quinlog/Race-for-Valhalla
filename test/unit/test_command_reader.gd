@@ -121,3 +121,11 @@ func test_skipped_follow_up_beat_clears_queue_when_it_closes() -> void:
 	assert_true(reader.on_beat_closed(6), "the follow-up beat closed empty")
 	assert_eq(reader.pending, CommandReader.NO_RUNE)
 	assert_false(reader.on_beat_closed(7))
+
+
+func test_prayer_blessing_doubles_the_next_prayer_glory() -> void:
+	reader.blessings[U] = true
+	var a: RuneAction = _cmd(U, U, 0)
+	assert_eq(a.glory, CommandReader.PRAYER_GLORY * 2)
+	assert_false(reader.blessings[U])
+	assert_eq(_cmd(U, U, 2).glory, CommandReader.PRAYER_GLORY)

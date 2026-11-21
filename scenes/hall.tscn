@@ -1,0 +1,143 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/hall.gd" id="1_hall"]
+
+[node name="Hall" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_hall")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.06, 0.05, 0.07, 1)
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 32
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 32
+theme_override_constants/margin_bottom = 24
+
+[node name="Layout" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Margin/Layout"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.4, 1)
+theme_override_font_sizes/font_size = 32
+text = "Race for Valhalla"
+horizontal_alignment = 1
+
+[node name="Founder" type="VBoxContainer" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="FounderPrompt" type="Label" parent="Margin/Layout/Founder"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Found your lineage. Name the line, and swear the Founder's oath. It binds every hero who follows."
+autowrap_mode = 3
+
+[node name="LineageName" type="LineEdit" parent="Margin/Layout/Founder"]
+unique_name_in_owner = true
+layout_mode = 2
+placeholder_text = "House of the Wolf"
+
+[node name="Oaths" type="HBoxContainer" parent="Margin/Layout/Founder"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="OdinButton" type="Button" parent="Margin/Layout/Founder/Oaths"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+toggle_mode = true
+text = "Odin's Oath"
+
+[node name="ThorButton" type="Button" parent="Margin/Layout/Founder/Oaths"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+toggle_mode = true
+text = "Thor's Oath"
+
+[node name="TyrButton" type="Button" parent="Margin/Layout/Founder/Oaths"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+focus_mode = 0
+toggle_mode = true
+text = "Tyr's Oath"
+
+[node name="OathInfo" type="Label" parent="Margin/Layout/Founder"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="FoundButton" type="Button" parent="Margin/Layout/Founder"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Found the lineage"
+
+[node name="HallPanel" type="VBoxContainer" parent="Margin/Layout"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="LineageTitle" type="Label" parent="Margin/Layout/HallPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+autowrap_mode = 3
+
+[node name="Roster" type="Label" parent="Margin/Layout/HallPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+autowrap_mode = 3
+
+[node name="NewDrengButton" type="Button" parent="Margin/Layout/HallPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Send out the next hero: the Dreng arc"
+
+[node name="AbandonButton" type="Button" parent="Margin/Layout/HallPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Abandon the lineage"
+
+[node name="Other" type="HBoxContainer" parent="Margin/Layout"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="QuickButton" type="Button" parent="Margin/Layout/Other"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Quick run (no lineage)"
+
+[node name="LabButton" type="Button" parent="Margin/Layout/Other"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+text = "Rhythm Lab"

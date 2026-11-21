@@ -68,6 +68,9 @@ var door_open: bool = false
 var closed_through: int = -1
 var over: bool = false
 var won: bool = false
+## Nothing happens before this beat: the countdown. Enemies, hazards and
+## hero commands completing earlier are ignored.
+var start_beat: int = 0
 
 var _announced_lock: int = -1
 
@@ -96,6 +99,10 @@ static func spawn(kind: String, cell: Vector2i) -> Enemy:
 			return RangerEnemy.new(cell)
 		"J":
 			return BossEnemy.jotunn(cell)
+		"V":
+			return VargEnemy.new(cell)
+		"S":
+			return ShieldThrallEnemy.new(cell)
 		_:
 			return BruteEnemy.new(cell)
 
@@ -195,12 +202,13 @@ func can_advance() -> bool:
 ## what happened ("" when the action has no stage effect).
 func act(player: int, action: RuneAction) -> String:
 	close_beat(action.beat - 1)
-	if over or player >= heroes.size():
+	if over or player >= heroes.size() or action.beat < start_beat:
 		return ""
 	var hero: Hero = heroes[player]
 	if not hero.is_alive():
 		return ""
-	hero.exposed = false
+	hero.exposed_commands = maxi(0, hero.exposed_commands - 1)
+	hero.exposed = hero.exposed_commands > 0
 	var text: String = ""
 	match action.kind:
 		RuneAction.Kind.MOVE:
@@ -213,7 +221,7 @@ func act(player: int, action: RuneAction) -> String:
 			hero.brace_blessed = action.empowered
 			text = "%s braces %s%s" % [hero.display_name, Rune.DIR_NAMES[action.dir], " (retaliating)" if action.empowered else ""]
 		RuneAction.Kind.PRAY:
-			if action.glory > 0:
+			if action.glory > 0 and Oath.prayer_glory_allowed(hero.oath):
 				hero.glory += action.glory
 	# Attacks log themselves, so their result reads before any break or kill.
 	if text != "" and action.kind != RuneAction.Kind.ATTACK:
@@ -237,14 +245,18 @@ func _move(hero: Hero, action: RuneAction) -> String:
 
 func _attack(hero: Hero, action: RuneAction) -> String:
 	var attack_name: String = RuneAction.ATTACK_NAMES[action.attack]
+	var damage: int = attack_damage(action.attack, action.perfect, action.empowered)
 	if action.attack == RuneAction.Attack.HEAVY:
 		hero.exposed = true
+		hero.exposed_commands = Oath.exposed_commands(hero.oath)
+		damage += Oath.heavy_bonus(hero.oath)
 	var foe: Enemy = enemy_at(hero.cell)
 	if foe == null:
 		var miss: String = "%s: %s hits nothing" % [hero.display_name, attack_name]
 		logged.emit(miss)
 		return miss
-	var dealt: int = foe.take_hit(hero.cell, attack_damage(action.attack, action.perfect, action.empowered))
+	foe.on_struck(action.attack, action.beat)
+	var dealt: int = foe.take_hit(hero.cell, damage)
 	var extra: String = ""
 	match action.attack:
 		RuneAction.Attack.TRIP:
@@ -272,7 +284,7 @@ func close_beat(beat: int) -> void:
 
 
 func _resolve(beat: int) -> void:
-	if over:
+	if over or beat < start_beat:
 		return
 	for hero: Hero in heroes:
 		if hero.final_beat == beat:
@@ -328,6 +340,8 @@ func _land(enemy: Enemy, beat: int) -> void:
 		_hit(hero, enemy, move, beat)
 		if over:
 			return
+	if enemy.is_alive():
+		enemy.landed(self)
 	enemy.finish(beat)
 
 
@@ -339,6 +353,10 @@ func _hit(hero: Hero, enemy: Enemy, move: EnemyMove, beat: int) -> void:
 		var text: String = "%s blocks %s" % [hero.display_name, move.display_name]
 		if hero.brace_blessed and enemy.is_alive():
 			text += " and strikes back for %d" % enemy.take_damage(RETALIATE_DAMAGE)
+		var heal: int = mini(Oath.block_heal(hero.oath), hero.max_hp - hero.hp)
+		if heal > 0:
+			hero.hp += heal
+			text += " (Tyr heals %d)" % heal
 		logged.emit(text)
 		_check_enemy_dead(enemy, hero)
 		return
@@ -555,6 +573,7 @@ func _final(hero: Hero, dir: Rune.Dir, perfect: bool, blessed: bool) -> String:
 		var foe: Enemy = enemy_at(h[0])
 		if foe == null:
 			continue
+		foe.on_struck(-1, closed_through)
 		total += foe.take_hit(h[0], h[1], h[2])
 		if not struck.has(foe):
 			struck.append(foe)

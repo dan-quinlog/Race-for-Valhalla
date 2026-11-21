@@ -4,5 +4,6 @@
 
 [resource]
 script = ExtResource("1_chunk")
-rows = PackedStringArray("F..R", "F.B.", "F..D")
+rows = PackedStringArray("F..R", "F.B.", "F...")
 encounter = true
+tier = 2

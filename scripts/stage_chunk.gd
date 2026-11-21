@@ -10,17 +10,21 @@ extends Resource
 ##   F  fire trap zone (every F in a column burns together)
 ##   D  exit door
 ##   1  player 1 start, 2 player 2 start
-##   B  brute enemy, R  ranger enemy
+##   B  brute enemy (Draugr), R  ranger enemy (Archer)
+##   V  Varg (wolf), S  Shield-thrall
 ##   J  Jötunn boss (its top-left zone; it covers 2 columns by 3 lanes, so
 ##      leave the rest of that block open)
 
 const LANES: int = 3
-const ZONE_CHARS: String = ".#FD12BRJ"
+const ZONE_CHARS: String = ".#FD12BRJVS"
 
 ## Lane strings, back lane (top of the screen) first. All the same length.
 @export var rows: PackedStringArray = PackedStringArray(["", "", ""])
 ## The camera locks on this chunk until its enemies are cleared.
 @export var encounter: bool = false
+## Difficulty for generated stages (StageGenerator): 1 easy to 3 hard.
+## 0 for chunks that aren't drawn as encounters.
+@export var tier: int = 0
 
 
 static func from_rows(p_rows: Array[String], p_encounter: bool = false) -> StageChunk:

@@ -150,8 +150,14 @@ func test_tripped_super_keeps_rhythm_on_beat() -> void:
 	assert_false(e.is_off_beat())
 
 
+func test_spawns_on_the_beat_whatever_its_first_start() -> void:
+	assert_false(_pattern([_own()], 1).is_rhythm_off_beat())
+	assert_eq(_pattern([_own()], 3).phase, Enemy.ON_BEAT)
+
+
 func test_trip_on_off_beat_move_brings_rhythm_back() -> void:
 	var e := _pattern([_own()], 1)
+	e.phase = 1  # knocked off the beat earlier
 	_stage([e])
 	assert_true(e.is_rhythm_off_beat())
 	e.try_act(1, stage)

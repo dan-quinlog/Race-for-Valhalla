@@ -542,3 +542,19 @@ func test_enemy_hit_that_kills_starts_the_final_strike() -> void:
 	assert_false(rules.over)
 	rules.close_beat(5)
 	assert_true(rules.over, "default Strike resolved, then the stage is lost")
+
+
+func test_nothing_resolves_before_the_start_beat() -> void:
+	var brute := BruteEnemy.new(Vector2i(1, 1))
+	_rules(["....", "1...", "...."], 1, [brute])
+	rules.start_beat = 3
+	rules.close_beat(2)
+	assert_eq(brute.cell, Vector2i(1, 1), "enemies wait for GO")
+	var move := RuneAction.new()
+	move.kind = RuneAction.Kind.MOVE
+	move.dir = Rune.Dir.DOWN
+	move.beat = 2
+	assert_eq(rules.act(0, move), "")
+	assert_eq(_hero().cell, Vector2i(0, 1))
+	rules.close_beat(4)
+	assert_true(brute.is_winding() or brute.cell != Vector2i(1, 1), "first step on the purple beat after GO")

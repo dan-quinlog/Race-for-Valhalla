@@ -16,8 +16,13 @@ var brace_dir: int = NO_DIR
 var brace_blessed: bool = false
 ## Last beat a warded (blessed) move keeps zone damage off.
 var ward_until: int = NONE
-## Took a Heavy swing: takes extra damage until the next command completes.
+## Took a Heavy swing: takes extra damage until the next command completes
+## (or the next two, under Thor's Oath).
 var exposed: bool = false
+## Commands left before `exposed` wears off.
+var exposed_commands: int = 0
+## The lineage's Oath.Kind, which changes some rules for this hero.
+var oath: int = Oath.Kind.NONE
 ## Made a Defensive attack: the next hit taken is halved.
 var guarded: bool = false
 ## Glory earned this run: prayers, kills and broken boss parts.

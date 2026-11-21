@@ -7,6 +7,11 @@ extends Control
 ## heroes awaiting their final strike), and the lock / GO prompts.
 ## A hero glows with their pending rune's color from the first beat of a
 ## command until the second, and glows white once fallen.
+## Zone borders pulse with the heartbeat: purple on the beat enemies spawn
+## on (the player's odd beats), green on the others. Each enemy carries a
+## diamond in the color of the beat its rhythm is on. Enemies slide between
+## zones and leave a fading arrow, so moves are easy to spot. A big 3-2-1-GO
+## counts the heroes in at the start of each stage.
 ## Placeholder shapes until real sprites exist.
 
 const SCROLL_SPEED: float = 6.0
@@ -26,10 +31,21 @@ const SUPER_FILL := Color(0.6, 0.2, 0.9, 0.25)
 const BRUTE_COLOR := Color(0.45, 0.55, 0.5)
 const RANGER_COLOR := Color(0.55, 0.5, 0.35)
 const PATTERN_COLOR := Color(0.4, 0.5, 0.45)
+const VARG_COLOR := Color(0.55, 0.55, 0.6)
+const THRALL_COLOR := Color(0.5, 0.42, 0.35)
+const SHIELD_COLOR := Color(0.75, 0.6, 0.3)
 const BOSS_BODY := Color(0.35, 0.5, 0.6, 0.55)
 const BOSS_PLATE := Color(0.6, 0.72, 0.8, 0.85)
 const BOSS_WOUND := Color(0.6, 0.05, 0.08, 0.85)
 const FINAL_COLOR := Color(1, 1, 1)
+const ON_BEAT_COLOR := Color(0.68, 0.35, 1.0)
+const OFF_BEAT_COLOR := Color(0.3, 0.9, 0.45)
+## Seconds a beat's border pulse takes to fade.
+const BEAT_PULSE_TIME: float = 0.35
+## Zones per second an enemy slides when it moves.
+const ENEMY_SLIDE_SPEED: float = 6.0
+## Seconds a move arrow stays on screen.
+const MOVE_TRAIL_TIME: float = 0.7
 ## Seconds a rune aura takes to fade back to neutral once its command ends.
 const AURA_FADE: float = 0.3
 const DEATH_AURA := Color(1, 1, 1)
@@ -55,6 +71,38 @@ var auras: Array[int] = [CommandReader.NO_RUNE, CommandReader.NO_RUNE]
 ## Per player: the last aura color and how much of it is still showing (0-1).
 var _aura_colors: Array[Color] = [Color.WHITE, Color.WHITE]
 var _aura_strength: Array[float] = [0.0, 0.0]
+## The last beat that started (on the buh), or -1 before the first.
+var beat_index: int = -1
+## Big text over the stage, for the start countdown ("" for none).
+var countdown_text: String = ""
+var _beat_pulse: float = 0.0
+## Per enemy: its drawn position in zone coordinates, sliding toward its cell.
+var _enemy_pos: Dictionary = {}
+## Per enemy: the cell it was last seen in, to spot new moves.
+var _enemy_cell: Dictionary = {}
+## Recent enemy moves: {from: Vector2, to: Vector2, left: float}.
+var _move_trails: Array[Dictionary] = []
+
+
+## The color of beat `index`: purple on the beat enemies spawn on, green off it.
+static func beat_color(index: int) -> Color:
+	return ON_BEAT_COLOR if posmod(index, Enemy.CADENCE) == Enemy.ON_BEAT else OFF_BEAT_COLOR
+
+
+## A new beat started: pulse the zone borders in its color.
+func on_beat(index: int) -> void:
+	beat_index = index
+	_beat_pulse = 1.0
+	queue_redraw()
+
+
+## Where enemy `e` is drawn, in zone coordinates (between cells mid-slide).
+func enemy_draw_pos(e: Enemy) -> Vector2:
+	return _enemy_pos.get(e, Vector2(e.cell))
+
+
+func move_trail_count() -> int:
+	return _move_trails.size()
 
 
 ## Lights player `player`'s hero with rune `rune`'s color, or fades it back
@@ -80,8 +128,13 @@ func zone_size() -> Vector2:
 
 ## Screen rect of a zone, inset by the gap, for the current scroll.
 func cell_rect(cell: Vector2i) -> Rect2:
+	return pos_rect(Vector2(cell))
+
+
+## Like cell_rect, for a position between zones.
+func pos_rect(at: Vector2) -> Rect2:
 	var z: Vector2 = zone_size()
-	var pos := Vector2((cell.x - display_col) * z.x, cell.y * z.y)
+	var pos := Vector2((at.x - display_col) * z.x, at.y * z.y)
 	return Rect2(pos + Vector2(GAP, GAP) * 0.5, z - Vector2(GAP, GAP))
 
 
@@ -108,9 +161,36 @@ func _process(delta: float) -> void:
 	for p: int in auras.size():
 		if auras[p] == CommandReader.NO_RUNE and _aura_strength[p] > 0.0:
 			_aura_strength[p] = maxf(0.0, _aura_strength[p] - delta / AURA_FADE)
+	_beat_pulse = maxf(0.0, _beat_pulse - delta / BEAT_PULSE_TIME)
 	if rules != null:
 		display_col = move_toward(display_col, rules.camera_col, delta * SCROLL_SPEED * maxf(1.0, rules.camera_col - display_col))
+		_update_enemy_motion(delta)
 	queue_redraw()
+
+
+## Slides enemies toward their cells and records a trail for each new move.
+func _update_enemy_motion(delta: float) -> void:
+	for t: Dictionary in _move_trails:
+		t.left -= delta
+	_move_trails = _move_trails.filter(func(t: Dictionary) -> bool: return t.left > 0.0)
+	var seen: Dictionary = {}
+	for e: Enemy in rules.enemies:
+		if e is BossEnemy or not e.is_alive():
+			continue
+		seen[e] = true
+		var target := Vector2(e.cell)
+		if not _enemy_pos.has(e):
+			_enemy_pos[e] = target
+			_enemy_cell[e] = e.cell
+			continue
+		if _enemy_cell[e] != e.cell:
+			_move_trails.append({"from": Vector2(_enemy_cell[e]), "to": target, "left": MOVE_TRAIL_TIME})
+			_enemy_cell[e] = e.cell
+		_enemy_pos[e] = (_enemy_pos[e] as Vector2).move_toward(target, delta * ENEMY_SLIDE_SPEED)
+	for e: Variant in _enemy_pos.keys():
+		if not seen.has(e):
+			_enemy_pos.erase(e)
+			_enemy_cell.erase(e)
 
 
 func _draw() -> void:
@@ -132,6 +212,7 @@ func _draw() -> void:
 		if e is BossEnemy and e.is_alive() and e.cell.x in visible_cols:
 			_draw_boss(e, font, text_size)
 	_draw_telegraphs(font, text_size)
+	_draw_move_trails()
 	for e: Enemy in rules.enemies:
 		if not (e is BossEnemy) and e.is_alive() and e.cell.x in visible_cols:
 			_draw_enemy(e, font, text_size)
@@ -141,6 +222,7 @@ func _draw() -> void:
 	for e: Enemy in rules.enemies:
 		if e is BossEnemy and e.is_alive():
 			_draw_boss_bar(e, font, text_size)
+	_draw_countdown(font)
 
 
 func _draw_zone(cell: Vector2i, font: Font, text_size: int, next_beat: int) -> void:
@@ -167,7 +249,31 @@ func _draw_zone(cell: Vector2i, font: Font, text_size: int, next_beat: int) -> v
 			draw_rect(r, DOOR_OPEN * Color(1, 1, 1, 0.15 + 0.25 * pulse))
 			draw_rect(door.grow(3.0 + 3.0 * pulse), DOOR_OPEN, false, 3.0)
 			_text_centered(font, "EXIT", door, door.position.y - 4.0, text_size, DOOR_OPEN)
-	draw_rect(r, ZONE_COLOR, false, 2.0)
+	var border: Color = ZONE_COLOR
+	var width: float = 2.0
+	if beat_index >= 0:
+		border = beat_color(beat_index) * Color(1, 1, 1, 0.45 + 0.55 * _beat_pulse)
+		width = 2.0 + 3.0 * _beat_pulse
+	draw_rect(r, border, false, width)
+
+
+func _draw_move_trails() -> void:
+	for t: Dictionary in _move_trails:
+		var a: Vector2 = pos_rect(t.from).get_center()
+		var b: Vector2 = pos_rect(t.to).get_center()
+		var col := Color(1, 1, 1, 0.7 * t.left / MOVE_TRAIL_TIME)
+		draw_line(a, b, col, 4.0)
+		var d: Vector2 = (b - a).normalized()
+		var tip: PackedVector2Array = [b, b - d * 14.0 + d.orthogonal() * 8.0, b - d * 14.0 - d.orthogonal() * 8.0]
+		draw_colored_polygon(tip, col)
+
+
+func _draw_countdown(font: Font) -> void:
+	if countdown_text == "":
+		return
+	var font_size: int = int(size.y * 0.3)
+	var col: Color = beat_color(beat_index) * Color(1, 1, 1, 0.5 + 0.5 * _beat_pulse)
+	_text_centered(font, countdown_text, Rect2(Vector2.ZERO, size), size.y * 0.5 + font_size * 0.35, font_size, col)
 
 
 func _draw_telegraphs(font: Font, text_size: int) -> void:
@@ -189,7 +295,7 @@ func _draw_telegraphs(font: Font, text_size: int) -> void:
 
 
 func _draw_enemy(e: Enemy, font: Font, text_size: int) -> void:
-	var r: Rect2 = cell_rect(e.cell)
+	var r: Rect2 = pos_rect(enemy_draw_pos(e))
 	var center := Vector2(r.position.x + r.size.x * 0.68, r.position.y + r.size.y * 0.5)
 	var s: float = minf(r.size.x, r.size.y) * 0.28
 	var super_up: bool = e.is_winding() and e.current.is_super
@@ -197,10 +303,30 @@ func _draw_enemy(e: Enemy, font: Font, text_size: int) -> void:
 		draw_colored_polygon(PackedVector2Array([center + Vector2(-s, 0), center + Vector2(s * 0.6, -s), center + Vector2(s * 0.6, s)]), RANGER_COLOR)
 	elif e is BruteEnemy:
 		draw_rect(Rect2(center - Vector2(s, s), Vector2(s, s) * 2.0), BRUTE_COLOR)
+	elif e is VargEnemy:
+		# A low, long wolf shape with ears.
+		draw_rect(Rect2(center + Vector2(-s * 1.1, -s * 0.2), Vector2(s * 2.2, s * 0.8)), VARG_COLOR)
+		draw_colored_polygon(PackedVector2Array([center + Vector2(-s * 1.1, -s * 0.2), center + Vector2(-s * 0.8, -s * 0.8), center + Vector2(-s * 0.5, -s * 0.2)]), VARG_COLOR)
+	elif e is ShieldThrallEnemy:
+		draw_rect(Rect2(center - Vector2(s * 0.7, s), Vector2(s * 1.4, s * 2.0)), THRALL_COLOR)
+		var thrall: ShieldThrallEnemy = e
+		if thrall.is_shielded(rules.closed_through + 1):
+			draw_circle(center + Vector2(-s * 0.8, 0), s * 0.75, SHIELD_COLOR)
+			draw_arc(center + Vector2(-s * 0.8, 0), s * 0.75, 0, TAU, 24, SHIELD_COLOR.darkened(0.4), 2.0)
+		else:
+			draw_circle(center + Vector2(-s * 0.4, s * 1.1), s * 0.5, SHIELD_COLOR.darkened(0.5))
 	else:
 		draw_rect(Rect2(center - Vector2(s, s) * 1.2, Vector2(s, s) * 2.4), SUPER_COLOR if super_up else PATTERN_COLOR)
 	_hp_bar(Rect2(center.x - s, center.y - s - 10.0, s * 2.0, 5.0), e)
+	# The beat this enemy's rhythm is on: a purple or green diamond.
+	var gem := center + Vector2(s * 1.25, -s * 0.9)
+	var rhythm_col: Color = beat_color(e.phase)
+	draw_colored_polygon(PackedVector2Array([gem + Vector2(0, -7), gem + Vector2(6, 0), gem + Vector2(0, 7), gem + Vector2(-6, 0)]), rhythm_col)
 	var label: String = e.display_name
+	if e.is_rhythm_off_beat():
+		label += " (OFF-BEAT)"
+	if e is ShieldThrallEnemy and not (e as ShieldThrallEnemy).is_shielded(rules.closed_through + 1):
+		label += " (OPEN)"
 	if e.is_winding():
 		label = ("SUPER " if super_up else "") + e.current.display_name
 	_text_centered(font, label, Rect2(center.x - r.size.x * 0.4, 0, r.size.x * 0.8, 0), center.y + s + text_size + 2.0, text_size - 1, TEXT_COLOR)
