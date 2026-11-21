@@ -1,6 +1,7 @@
 extends GutTest
 
 const StageScene: PackedScene = preload("res://scenes/stage.tscn")
+const StageScript: GDScript = preload("res://scripts/stage.gd")
 
 var stage: Control
 
@@ -59,7 +60,7 @@ func test_starts_solo_with_one_hero() -> void:
 
 
 func test_completed_command_moves_the_hero() -> void:
-	_command(0, Rune.Dir.DOWN, Rune.Dir.RIGHT, 1)
+	_command(0, Rune.Dir.DOWN, Rune.Dir.RIGHT, StageScript.START_BEAT)
 	assert_eq(stage.rules.heroes[0].cell, Vector2i(1, 1))
 	assert_string_contains(stage.get_node("%StageLog").text, "moves right")
 
@@ -73,7 +74,7 @@ func test_two_players_gives_two_heroes() -> void:
 	stage.set_two_players(true)
 	assert_true(stage.panels[1].visible)
 	assert_eq(stage.rules.heroes.size(), 2)
-	_command(1, Rune.Dir.DOWN, Rune.Dir.RIGHT, 1)
+	_command(1, Rune.Dir.DOWN, Rune.Dir.RIGHT, StageScript.START_BEAT)
 	assert_eq(stage.rules.heroes[1].cell, Vector2i(1, 2))
 	assert_eq(stage.rules.heroes[0].cell, Vector2i(0, 1))
 
@@ -251,3 +252,38 @@ func test_beating_the_boss_completes_the_dreng_arc() -> void:
 	assert_eq(s.run.lineage.heroes[0].fate, Lineage.Fate.COMPLETED_DRENG)
 	s.rules.ended.emit(true)
 	assert_eq(s.run.lineage.heroes.size(), 1, "recorded once")
+
+
+func test_stage_counts_in_and_ignores_commands_before_go() -> void:
+	assert_eq(StageScript.countdown_text(0), "3")
+	assert_eq(StageScript.countdown_text(2), "1")
+	assert_eq(StageScript.countdown_text(StageScript.START_BEAT), "GO!")
+	assert_eq(StageScript.countdown_text(StageScript.START_BEAT + 1), "")
+	assert_eq(stage.rules.start_beat, StageScript.START_BEAT)
+	stage._on_beat(1)
+	assert_eq(stage.get_node("%StageView").countdown_text, "2")
+	_command(0, Rune.Dir.DOWN, Rune.Dir.RIGHT, 0)
+	assert_eq(stage.rules.heroes[0].cell, Vector2i(0, 1), "too early: before GO")
+
+
+func test_zone_borders_pulse_purple_on_the_beat_and_green_off_it() -> void:
+	var view: StageView = stage.get_node("%StageView")
+	assert_eq(StageView.beat_color(0), StageView.ON_BEAT_COLOR)
+	assert_eq(StageView.beat_color(1), StageView.OFF_BEAT_COLOR)
+	assert_eq(StageView.beat_color(Enemy.ON_BEAT), StageView.ON_BEAT_COLOR, "enemies spawn on purple")
+	stage._on_beat(5)
+	assert_eq(view.beat_index, 5)
+
+
+func test_enemy_moves_slide_and_leave_a_trail() -> void:
+	var view: StageView = stage.get_node("%StageView")
+	view._process(0.01)
+	var e: Enemy = stage.rules.enemies[0]
+	var start: Vector2 = view.enemy_draw_pos(e)
+	e.cell += Vector2i(-1, 0)
+	view._process(0.05)
+	assert_eq(view.move_trail_count(), 1)
+	assert_true(view.enemy_draw_pos(e).x < start.x and view.enemy_draw_pos(e).x > float(e.cell.x), "mid-slide")
+	view._process(1.0)
+	assert_eq(view.enemy_draw_pos(e), Vector2(e.cell))
+	assert_eq(view.move_trail_count(), 0)

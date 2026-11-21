@@ -68,6 +68,9 @@ var door_open: bool = false
 var closed_through: int = -1
 var over: bool = false
 var won: bool = false
+## Nothing happens before this beat: the countdown. Enemies, hazards and
+## hero commands completing earlier are ignored.
+var start_beat: int = 0
 
 var _announced_lock: int = -1
 
@@ -199,7 +202,7 @@ func can_advance() -> bool:
 ## what happened ("" when the action has no stage effect).
 func act(player: int, action: RuneAction) -> String:
 	close_beat(action.beat - 1)
-	if over or player >= heroes.size():
+	if over or player >= heroes.size() or action.beat < start_beat:
 		return ""
 	var hero: Hero = heroes[player]
 	if not hero.is_alive():
@@ -281,7 +284,7 @@ func close_beat(beat: int) -> void:
 
 
 func _resolve(beat: int) -> void:
-	if over:
+	if over or beat < start_beat:
 		return
 	for hero: Hero in heroes:
 		if hero.final_beat == beat:

@@ -15,6 +15,10 @@ const PERFECT_WINDOW: float = 0.04
 const LOG_LENGTH: int = 6
 const LAB_SCENE: String = "res://scenes/rhythm_lab.tscn"
 const HALL_SCENE: String = "res://scenes/hall.tscn"
+## Each stage opens with a count of 3-2-1 on beats 0-2 and GO! on this beat,
+## the first beat anything happens. Enemies take their first step on the
+## next purple beat after it.
+const START_BEAT: int = 3
 ## Seconds between clearing a stage and entering the next.
 const NEXT_STAGE_DELAY: float = 3.0
 
@@ -97,6 +101,9 @@ func _load_stage(index: int, carry: Array[Hero]) -> void:
 		p.configure(_clock.period, WINDOW, PERFECT_WINDOW)
 	_ekg.configure(_clock.period, WINDOW, WINDOW, PERFECT_WINDOW)
 	rules = StageRules.new(StageMap.build(run.stage_chunks(index)), 2 if two_players else 1)
+	rules.start_beat = START_BEAT
+	_view.beat_index = -1
+	_view.countdown_text = ""
 	var oath: int = run.oath()
 	for h: Hero in rules.heroes:
 		h.display_name = run.hero_names[h.player]
@@ -177,6 +184,15 @@ func _unhandled_input(event: InputEvent) -> void:
 func _on_beat(index: int) -> void:
 	for p: PlayerPanel in panels:
 		p.on_beat(index)
+	_view.on_beat(index)
+	_view.countdown_text = countdown_text(index)
+
+
+## The start countdown shown on beat `index`: "3", "2", "1", "GO!", then "".
+static func countdown_text(index: int) -> String:
+	if index < 0 or index > START_BEAT:
+		return ""
+	return "GO!" if index == START_BEAT else str(START_BEAT - index)
 
 
 func _on_beat_closed(index: int) -> void:
