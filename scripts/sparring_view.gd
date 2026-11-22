@@ -1,9 +1,9 @@
 class_name SparringView
 extends Control
 ## Draws the Rhythm Lab's training yard (SparringRules): the zone grid with
-## borders pulsing on every heartbeat, the dummies (Post, Walker, Sparrer)
-## (Post, Walker, Sparrer, Archer) with their states, telegraphed strikes
-## with a countdown, and the heroes with a facing arrow, shield, Heavy
+## borders pulsing on every heartbeat, the dummies (Post, Draugr, Varg,
+## Archer) with their states, the Archer's telegraphed arrow with a
+## countdown, and the heroes with a facing arrow, shield, Heavy
 ## charge glow and blessing ring. Attacks flash the zones they hit, with
 ## BLOCK / EVADE pops. Placeholder shapes until real sprites.
 
@@ -17,8 +17,8 @@ const SHOT_TIME: float = 0.8
 const SHOT_COLORS := {"HIT": Color(1.0, 0.35, 0.2), "BLOCK": Color(0.6, 0.8, 1.0), "MISS": Color(0.75, 0.72, 0.65)}
 const HERO_COLORS: Array[Color] = [Color(0.45, 0.7, 1.0), Color(1.0, 0.65, 0.3)]
 const DUMMY_COLOR := Color(0.6, 0.5, 0.38)
-const WALKER_COLOR := Color(0.55, 0.6, 0.5)
-const SPARRER_COLOR := Color(0.7, 0.45, 0.3)
+const DRAUGR_COLOR := Color(0.45, 0.55, 0.45)
+const VARG_COLOR := Color(0.62, 0.6, 0.58)
 const TELL_FILL := Color(1.0, 0.45, 0.1, 0.18)
 const TELL_HOT := Color(1.0, 0.35, 0.1, 0.45)
 const CHARGE_COLOR := Color(1.0, 0.3, 0.2)
@@ -165,12 +165,14 @@ func _draw_dummy(d: SparringRules.Dummy, open_beat: int, font: Font, text_size: 
 		SparringRules.Dummy.Kind.POST:
 			draw_rect(Rect2(c - Vector2(s * 0.35, s), Vector2(s * 0.7, s * 2.0)), DUMMY_COLOR)
 			draw_rect(Rect2(c - Vector2(s, s * 0.6), Vector2(s * 2.0, s * 0.3)), DUMMY_COLOR)
-		SparringRules.Dummy.Kind.WALKER:
-			draw_circle(c, s, WALKER_COLOR)
-			var tip := c + Vector2(d.walk_dir * s * 1.4, 0)
-			draw_line(c, tip, TEXT_COLOR, 2.0)
-		SparringRules.Dummy.Kind.SPARRER:
-			draw_rect(Rect2(c - Vector2(s, s), Vector2(s * 2.0, s * 2.0)), SPARRER_COLOR)
+		SparringRules.Dummy.Kind.DRAUGR:
+			draw_rect(Rect2(c - Vector2(s * 1.1, s * 1.1), Vector2(s * 2.2, s * 2.2)), DRAUGR_COLOR)
+		SparringRules.Dummy.Kind.VARG:
+			# Crouched (flat) on the beat it leaps: the sprite change a
+			# player learns to read.
+			var h: float = s * (0.45 if d.is_leaping(open_beat) else 0.8)
+			var fx: float = signf(d.leap_dir.x) if d.is_leaping(open_beat) and d.leap_dir.x != 0 else -1.0
+			draw_colored_polygon(PackedVector2Array([c + Vector2(fx * s * 1.3, 0), c + Vector2(-fx * s, -h), c + Vector2(-fx * s, h)]), VARG_COLOR)
 		SparringRules.Dummy.Kind.ARCHER:
 			draw_colored_polygon(PackedVector2Array([c + Vector2(-s, 0), c + Vector2(s, -s), c + Vector2(s, s)]), ARCHER_COLOR)
 	if d.is_vulnerable(open_beat):

@@ -16,6 +16,11 @@ func _dummy(kind: SparringRules.Dummy.Kind) -> SparringRules.Dummy:
 	return null
 
 
+## Clears the yard of every dummy but these kinds.
+func _keep(kinds: Array) -> void:
+	rules.dummies = rules.dummies.filter(func(d: SparringRules.Dummy) -> bool: return d.kind in kinds)
+
+
 func _go(d: Rune.Dir, beat: int, perfect: bool = false) -> void:
 	rules.act(0, TurnAction.direction(d, beat, perfect))
 
@@ -56,6 +61,7 @@ func test_perfect_attack_deals_more() -> void:
 
 
 func test_heavy_stacks_to_three_and_powers_the_next_attack() -> void:
+	_keep([SparringRules.Dummy.Kind.POST])
 	var post: SparringRules.Dummy = _beside_post()
 	for b: int in 4:
 		_cast(RuneCorner.Kind.HEAVY, b + 1)
@@ -107,17 +113,20 @@ func test_blessing_is_spent_on_an_attack_that_does_not_kill() -> void:
 
 
 func test_trip_roots_and_sets_up_a_bigger_hit() -> void:
-	var walker: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.WALKER)
-	walker.cell = Vector2i(4, 0)
-	hero.cell = Vector2i(3, 0)
+	_keep([SparringRules.Dummy.Kind.VARG])
+	var varg: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.VARG)
+	varg.cell = Vector2i(5, 0)
+	hero.cell = Vector2i(4, 0)
 	_cast(RuneCorner.Kind.TRIP, 1)
-	assert_eq(walker.hp, SparringRules.DUMMY_HP - SparringRules.TRIP_DAMAGE)
+	assert_eq(varg.hp, SparringRules.VARG_HP - SparringRules.TRIP_DAMAGE)
+	hero.cell = Vector2i(1, 2)
 	rules.end_turn(1)
 	rules.end_turn(2)
-	assert_eq(walker.cell, Vector2i(4, 0), "rooted on the trip beat and the next")
-	var hp: int = walker.hp
+	assert_eq(varg.cell, Vector2i(5, 0), "rooted on the trip beat and the next")
+	hero.cell = Vector2i(4, 0)
+	var hp: int = varg.hp
 	_go(Rune.Dir.RIGHT, 3)
-	assert_eq(hp - walker.hp, roundi(SparringRules.BASIC_DAMAGE * SparringRules.BONUS))
+	assert_eq(hp - varg.hp, roundi(SparringRules.BASIC_DAMAGE * SparringRules.BONUS))
 
 
 func test_trip_and_flourish_lose_the_charge() -> void:
@@ -131,17 +140,18 @@ func test_trip_and_flourish_lose_the_charge() -> void:
 
 func test_flourish_hits_all_four_sides() -> void:
 	var post: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.POST)
-	var walker: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.WALKER)
+	var varg: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.VARG)
 	hero.cell = Vector2i(3, 2)
 	post.cell = Vector2i(3, 1)
-	walker.cell = Vector2i(2, 2)
+	varg.cell = Vector2i(2, 2)
 	_cast(RuneCorner.Kind.FLOURISH, 1)
 	assert_eq(post.hp, SparringRules.DUMMY_HP - SparringRules.FLOURISH_DAMAGE)
-	assert_eq(walker.hp, SparringRules.DUMMY_HP - SparringRules.FLOURISH_DAMAGE)
+	assert_eq(varg.hp, SparringRules.VARG_HP - SparringRules.FLOURISH_DAMAGE)
 
 
 ## The Archer winds up on beat 2 and looses on beat 4, down lane 1.
 func _arrow_incoming() -> void:
+	_keep([SparringRules.Dummy.Kind.ARCHER])
 	hero.cell = Vector2i(5, 1)
 	rules.end_turn(2)
 	assert_eq(_dummy(SparringRules.Dummy.Kind.ARCHER).strike_beat, 4)
@@ -195,17 +205,6 @@ func test_stepping_out_of_the_lane_dodges() -> void:
 	assert_eq(hero.hp, SparringRules.HERO_HP)
 
 
-func test_attacking_the_sparrer_with_a_shield_also_blocks_its_swing() -> void:
-	var sparrer: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.SPARRER)
-	hero.cell = sparrer.cell + Vector2i(-1, 0)
-	rules.end_turn(4)
-	rules.end_turn(5)
-	_go(Rune.Dir.RIGHT, 6)
-	assert_lt(sparrer.hp, SparringRules.DUMMY_HP)
-	rules.end_turn(6)
-	assert_eq(hero.hp, SparringRules.HERO_HP)
-
-
 func test_charged_hero_is_exposed_to_hits() -> void:
 	_arrow_incoming()
 	_cast(RuneCorner.Kind.HEAVY, 4)
@@ -214,6 +213,7 @@ func test_charged_hero_is_exposed_to_hits() -> void:
 
 
 func test_dead_dummy_respawns_at_home() -> void:
+	_keep([SparringRules.Dummy.Kind.POST])
 	var post: SparringRules.Dummy = _beside_post()
 	post.hp = 1
 	_go(Rune.Dir.LEFT, 1)
@@ -227,6 +227,7 @@ func _two_in_line() -> SparringRules.Fighter:
 	rules = SparringRules.new(2)
 	hero = rules.heroes[0]
 	var behind: SparringRules.Fighter = rules.heroes[1]
+	_keep([SparringRules.Dummy.Kind.ARCHER])
 	hero.cell = Vector2i(5, 1)
 	behind.cell = Vector2i(4, 1)
 	rules.end_turn(2)
@@ -276,8 +277,150 @@ func test_blocker_sharing_a_zone_covers_their_partner() -> void:
 
 
 func test_empty_lane_arrow_flies_off_the_yard() -> void:
+	_keep([SparringRules.Dummy.Kind.ARCHER])
 	hero.cell = Vector2i(1, 0)
 	rules.end_turn(2)
 	watch_signals(rules)
 	rules.end_turn(4)
 	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(7, 1), Vector2i(-1, 1), "MISS"])
+
+
+## Only the Draugr, at (5, 0) on its loop from beat 0: attack/move on beats
+## 1, 5..., power slam on 3, 7...
+func _draugr_at(hero_cell: Vector2i) -> SparringRules.Dummy:
+	_keep([SparringRules.Dummy.Kind.DRAUGR])
+	hero.cell = hero_cell
+	return _dummy(SparringRules.Dummy.Kind.DRAUGR)
+
+
+func test_draugr_attacks_a_hero_beside_it() -> void:
+	var draugr: SparringRules.Dummy = _draugr_at(Vector2i(4, 0))
+	rules.end_turn(1)
+	assert_eq(hero.hp, SparringRules.HERO_HP - SparringRules.DRAUGR_DAMAGE)
+	assert_eq(draugr.cell, Vector2i(5, 0))
+
+
+func test_draugr_stands_between_steps() -> void:
+	var draugr: SparringRules.Dummy = _draugr_at(Vector2i(1, 1))
+	rules.end_turn(0)
+	rules.end_turn(2)
+	assert_eq(draugr.cell, Vector2i(5, 0))
+	rules.end_turn(1)
+	assert_eq(draugr.cell, Vector2i(4, 0), "attack/move closes the longer gap first")
+
+
+func test_backing_away_from_attack_move_lets_it_follow() -> void:
+	var draugr: SparringRules.Dummy = _draugr_at(Vector2i(4, 0))
+	_go(Rune.Dir.LEFT, 1)
+	rules.end_turn(1)
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+	assert_eq(draugr.cell, Vector2i(4, 0))
+
+
+func test_power_slam_hits_all_around() -> void:
+	_draugr_at(Vector2i(5, 1))
+	rules.end_turn(3)
+	assert_eq(hero.hp, SparringRules.HERO_HP - SparringRules.SLAM_DAMAGE)
+
+
+func test_backing_away_from_the_slam_makes_distance() -> void:
+	var draugr: SparringRules.Dummy = _draugr_at(Vector2i(5, 1))
+	_go(Rune.Dir.DOWN, 3)
+	rules.end_turn(3)
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+	assert_eq(draugr.cell, Vector2i(5, 0))
+
+
+func test_attacking_the_draugr_with_a_shield_blocks_it() -> void:
+	var draugr: SparringRules.Dummy = _draugr_at(Vector2i(5, 1))
+	_go(Rune.Dir.UP, 1)
+	assert_lt(draugr.hp, SparringRules.DRAUGR_HP)
+	rules.end_turn(1)
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+
+
+## Only the Varg: it prowls from (7, 1) to (6, 1) on beat 0, with the hero
+## in zone 3 of its leap at (3, 1), and readies a leap for beat 1.
+func _varg_lined_up(kinds: Array = [SparringRules.Dummy.Kind.VARG]) -> SparringRules.Dummy:
+	_keep(kinds)
+	var varg: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.VARG)
+	varg.cell = Vector2i(7, 1)
+	hero.cell = Vector2i(3, 1)
+	rules.end_turn(0)
+	assert_eq(varg.cell, Vector2i(6, 1))
+	assert_true(varg.is_leaping(1))
+	return varg
+
+
+func test_varg_comes_in_line_before_closing() -> void:
+	_keep([SparringRules.Dummy.Kind.VARG])
+	var varg: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.VARG)
+	hero.cell = Vector2i(1, 1)
+	rules.end_turn(0)
+	assert_eq(varg.cell, Vector2i(6, 1), "into the hero's lane first")
+	rules.end_turn(1)
+	assert_eq(varg.cell, Vector2i(5, 1), "then closer along it")
+
+
+func test_varg_leaps_and_lands_short_of_the_hero() -> void:
+	var varg: SparringRules.Dummy = _varg_lined_up()
+	rules.end_turn(1)
+	assert_eq(varg.cell, Vector2i(4, 1))
+	assert_eq(hero.hp, SparringRules.HERO_HP - SparringRules.VARG_DAMAGE)
+
+
+func test_shield_toward_the_varg_halts_both() -> void:
+	var varg: SparringRules.Dummy = _varg_lined_up()
+	_go(Rune.Dir.RIGHT, 1)
+	assert_eq(hero.cell, Vector2i(3, 1), "stood firm")
+	rules.end_turn(1)
+	assert_eq(varg.cell, Vector2i(4, 1))
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+
+
+func test_moving_into_the_leap_without_a_shield_gets_bitten() -> void:
+	rules = SparringRules.new(1, false)
+	hero = rules.heroes[0]
+	var varg: SparringRules.Dummy = _varg_lined_up()
+	_go(Rune.Dir.RIGHT, 1)
+	rules.end_turn(1)
+	assert_eq(hero.cell, Vector2i(4, 1))
+	assert_eq(varg.cell, Vector2i(5, 1))
+	assert_eq(hero.hp, SparringRules.HERO_HP - SparringRules.VARG_DAMAGE)
+
+
+func test_evading_lets_the_varg_pass() -> void:
+	var varg: SparringRules.Dummy = _varg_lined_up()
+	_cast(RuneCorner.Kind.PRAYER, 0)
+	_go(Rune.Dir.RIGHT, 1)
+	rules.end_turn(1)
+	assert_eq(hero.cell, Vector2i(4, 1))
+	assert_eq(varg.cell, Vector2i(3, 1), "landed in the zone the hero left")
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+
+
+func test_sidestepping_the_leap_still_gets_bitten() -> void:
+	var varg: SparringRules.Dummy = _varg_lined_up()
+	_go(Rune.Dir.UP, 1)
+	rules.end_turn(1)
+	assert_eq(varg.cell, Vector2i(3, 1))
+	assert_eq(hero.hp, SparringRules.HERO_HP - SparringRules.VARG_DAMAGE)
+
+
+func test_varg_rests_a_beat_after_leaping() -> void:
+	var varg: SparringRules.Dummy = _varg_lined_up()
+	rules.end_turn(1)
+	var hp: int = hero.hp
+	rules.end_turn(2)
+	assert_eq(hero.hp, hp)
+	assert_eq(varg.cell, Vector2i(4, 1))
+	assert_true(varg.is_leaping(3), "bites again after its rest")
+
+
+func test_a_body_in_the_way_cuts_the_leap_short() -> void:
+	_dummy(SparringRules.Dummy.Kind.POST).cell = Vector2i(0, 0)
+	var varg: SparringRules.Dummy = _varg_lined_up([SparringRules.Dummy.Kind.VARG, SparringRules.Dummy.Kind.POST])
+	_dummy(SparringRules.Dummy.Kind.POST).cell = Vector2i(5, 1)
+	rules.end_turn(1)
+	assert_eq(varg.cell, Vector2i(6, 1))
+	assert_eq(hero.hp, SparringRules.HERO_HP)

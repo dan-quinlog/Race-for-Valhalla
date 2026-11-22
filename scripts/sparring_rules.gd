@@ -27,6 +27,21 @@ extends RefCounted
 ##
 ## Hero actions resolve first (act), then the dummies (end_turn), so a move
 ## or block on the hit beat counts.
+##
+## Foes follow simple, repeatable patterns the player learns by sight:
+## - Draugr, every other beat: attack/move, then power slam. Attack/move
+##   attacks a hero next to it (after the heroes moved), or else steps
+##   toward the nearest hero, so backing away keeps it close. The slam hits
+##   all four zones around it, so backing away from that makes distance.
+##   No warning before either lands.
+## - Varg, every beat: if a hero stood in line within LEAP_RANGE zones at
+##   the start of the beat (clear path), it leaps along that line and bites,
+##   landing next to wherever the hero ended up. A shield facing it stops
+##   the hero in place and the Varg just short of them. An evading hero lets
+##   it pass into the zone they left. Bodies cut a leap short. It rests a
+##   beat after a leap. Otherwise it prowls one zone: first into line with
+##   the nearest hero (keeping its distance), then closer along the line.
+## - Archer: telegraphed arrow down its lane (countdown shown).
 
 signal logged(text: String)
 ## Zones to flash in the view, with a short label ("" for none).
@@ -64,7 +79,20 @@ const STRIKE_CYCLE: int = 4
 const STRIKE_WINDUP: int = 2
 const STRIKE_DAMAGE: int = 10
 
+const DRAUGR_HP: int = 40
+## The Draugr's loop: stand, attack/move, stand, power slam.
+const DRAUGR_CYCLE: int = 4
+const DRAUGR_ATTACK_STEP: int = 1
+const DRAUGR_SLAM_STEP: int = 3
+const DRAUGR_DAMAGE: int = 10
+const SLAM_DAMAGE: int = 15
+const VARG_HP: int = 20
+const VARG_DAMAGE: int = 10
+## A hero this many zones away in line (or closer) draws a leap.
+const LEAP_RANGE: int = 3
+
 const ATTACK_COLOR := Color(0.92, 0.25, 0.2)
+const LEAP_COLOR := Color(0.75, 0.7, 0.6)
 const STRIKE_COLOR := Color(1.0, 0.55, 0.15)
 const BLOCK_COLOR := Color(0.6, 0.8, 1.0)
 const EVADE_COLOR := Color(1.0, 0.85, 0.3)
@@ -91,27 +119,43 @@ class Fighter extends Combatant:
 
 
 class Dummy extends Combatant:
-	enum Kind { POST, WALKER, SPARRER, ARCHER }
+	enum Kind { POST, DRAUGR, VARG, ARCHER }
 	var kind: Kind
 	var home: Vector2i
-	## WALKER: the way it's walking, between min_col and max_col.
-	var walk_dir: int = LEFT
-	var min_col: int = 0
-	var max_col: int = COLS - 1
 	var rooted_until: int = NONE
 	var vulnerable_until: int = NONE
 	var died_on: int = NONE
-	## SPARRER / ARCHER: the beat its strike lands, or NONE, and the zones
-	## it threatens.
+	## ARCHER: the beat its arrow flies, or NONE, and the zones it threatens.
 	var strike_beat: int = NONE
 	var targets: Array[Vector2i] = []
-	## Which beat of STRIKE_CYCLE its wind-up starts on.
+	## ARCHER: which beat of STRIKE_CYCLE its wind-up starts on. DRAUGR:
+	## which beat of DRAUGR_CYCLE its loop starts on.
 	var cycle_offset: int = 0
+	## VARG: the beat it leaps on (NONE when not leaping), at which hero,
+	## along which line, and the last beat it rests after a leap.
+	var leap_beat: int = NONE
+	var leap_target: int = -1
+	var leap_dir := Vector2i.ZERO
+	## Where the target stood when the leap was chosen.
+	var leap_aim := Vector2i.ZERO
+	var rest_until: int = NONE
 
-	func _init(p_name: String, p_kind: Kind, p_cell: Vector2i) -> void:
-		super(p_name, DUMMY_HP, p_cell)
+	func _init(p_name: String, p_kind: Kind, p_cell: Vector2i, p_hp: int = DUMMY_HP) -> void:
+		super(p_name, p_hp, p_cell)
 		kind = p_kind
 		home = p_cell
+
+	func is_leaping(beat: int) -> bool:
+		return leap_beat == beat
+
+	func reset() -> void:
+		hp = max_hp
+		cell = home
+		rooted_until = NONE
+		vulnerable_until = NONE
+		strike_beat = NONE
+		leap_beat = NONE
+		rest_until = NONE
 
 	func is_rooted(beat: int) -> bool:
 		return beat <= rooted_until
@@ -133,11 +177,8 @@ func _init(player_count: int = 1, p_shields: bool = true) -> void:
 	for p: int in player_count:
 		heroes.append(Fighter.new(p, Vector2i(1, 1 + p)))
 	dummies.append(Dummy.new("Post", Dummy.Kind.POST, Vector2i(3, 1)))
-	var walker := Dummy.new("Walker", Dummy.Kind.WALKER, Vector2i(5, 0))
-	walker.min_col = 2
-	walker.max_col = 6
-	dummies.append(walker)
-	dummies.append(Dummy.new("Sparrer", Dummy.Kind.SPARRER, Vector2i(6, 2)))
+	dummies.append(Dummy.new("Draugr", Dummy.Kind.DRAUGR, Vector2i(5, 0), DRAUGR_HP))
+	dummies.append(Dummy.new("Varg", Dummy.Kind.VARG, Vector2i(6, 2), VARG_HP))
 	var archer := Dummy.new("Archer", Dummy.Kind.ARCHER, Vector2i(7, 1))
 	archer.cycle_offset = 2
 	dummies.append(archer)
@@ -170,10 +211,31 @@ func dummy_at(cell: Vector2i) -> Dummy:
 
 
 func hero_at(cell: Vector2i) -> bool:
+	return first_hero_at(cell) != null
+
+
+func first_hero_at(cell: Vector2i) -> Fighter:
 	for h: Fighter in heroes:
 		if h.cell == cell:
-			return true
-	return false
+			return h
+	return null
+
+
+## True if a dummy could stand in `cell`: on the yard, nobody there.
+func is_free(cell: Vector2i) -> bool:
+	return in_bounds(cell) and dummy_at(cell) == null and not hero_at(cell)
+
+
+static func _manhattan(a: Vector2i, b: Vector2i) -> int:
+	return absi(a.x - b.x) + absi(a.y - b.y)
+
+
+func nearest_hero(from: Vector2i) -> Fighter:
+	var best: Fighter = null
+	for h: Fighter in heroes:
+		if best == null or _manhattan(h.cell, from) < _manhattan(best.cell, from):
+			best = h
+	return best
 
 
 ## Resolves one hero action for its beat.
@@ -270,81 +332,206 @@ func _strike(h: Fighter, cells: Array[Vector2i], base: float, a: TurnAction, lab
 	_log(text + (" -> " + ", ".join(parts) if not parts.is_empty() else " -> nothing there"))
 
 
-## True if a hit from direction `d` lands on `h`'s zone this beat.
+## True if an arrow or leap from direction `d` comes at `h` this beat, so a
+## shield raised that way stands firm. Melee hits (Draugr) aren't predicted:
+## they react to where the hero ends up.
 func _hit_coming(h: Fighter, n: int, d: int) -> bool:
 	for dummy: Dummy in dummies:
-		if dummy.is_alive() and dummy.strike_beat == n and _threatens(dummy, h) and _from_dir(dummy, h) == d:
+		if not dummy.is_alive() or _from_dir(dummy, h) != d:
+			continue
+		if dummy.strike_beat == n and _threatens(dummy, h):
+			return true
+		if dummy.is_leaping(n) and heroes[dummy.leap_target] == h:
 			return true
 	return false
 
 
 func _threatens(dummy: Dummy, h: Fighter) -> bool:
-	if dummy.kind == Dummy.Kind.ARCHER:
-		return h.cell.y == dummy.cell.y and h.cell.x < dummy.cell.x
-	return h.cell in dummy.targets
+	return dummy.kind == Dummy.Kind.ARCHER and h.cell.y == dummy.cell.y and h.cell.x < dummy.cell.x
 
 
+## The Rune.Dir from `h` toward `dummy`: the way a shield must face.
 static func _from_dir(dummy: Dummy, h: Fighter) -> int:
-	return Rune.Dir.RIGHT if dummy.cell.x > h.cell.x else Rune.Dir.LEFT
+	var dx: int = dummy.cell.x - h.cell.x
+	var dy: int = dummy.cell.y - h.cell.y
+	if absi(dx) >= absi(dy):
+		return Rune.Dir.RIGHT if dx > 0 else Rune.Dir.LEFT
+	return Rune.Dir.DOWN if dy > 0 else Rune.Dir.UP
 
 
-## Beat `n` closed: the dummies act, after the heroes.
+## Beat `n` closed: the dummies act, after the heroes. Then each Varg
+## picks its leap for the next beat from where everyone stands now.
 func end_turn(n: int) -> void:
 	beat = n
 	for d: Dummy in dummies:
 		if not d.is_alive():
-			if d.died_on != NONE and n - d.died_on >= RESPAWN_BEATS and dummy_at(d.home) == null and not hero_at(d.home):
-				d.hp = d.max_hp
-				d.cell = d.home
-				d.rooted_until = NONE
-				d.vulnerable_until = NONE
-				d.strike_beat = NONE
+			if d.died_on != NONE and n - d.died_on >= RESPAWN_BEATS and is_free(d.home):
+				d.reset()
 				_log("%s is back up" % d.display_name)
 			continue
 		match d.kind:
-			Dummy.Kind.WALKER:
-				_walk(d, n)
-			Dummy.Kind.SPARRER, Dummy.Kind.ARCHER:
+			Dummy.Kind.DRAUGR:
+				_draugr(d, n)
+			Dummy.Kind.VARG:
+				_varg(d, n)
+			Dummy.Kind.ARCHER:
 				_strike_cycle(d, n)
+	for d: Dummy in dummies:
+		if d.kind == Dummy.Kind.VARG and d.is_alive():
+			_plan_leap(d, n + 1)
 	for h: Fighter in heroes:
 		if h.hp <= 0:
 			h.hp = h.max_hp
 			_log("%s would have fallen. Healed for practice." % h.display_name)
 
 
-func _walk(d: Dummy, n: int) -> void:
-	if d.is_rooted(n):
+func _draugr(d: Dummy, n: int) -> void:
+	match posmod(n - d.cycle_offset, DRAUGR_CYCLE):
+		DRAUGR_ATTACK_STEP:
+			for h: Fighter in heroes:
+				if _manhattan(h.cell, d.cell) == 1:
+					_hit_hero(h, d, n, DRAUGR_DAMAGE)
+					return
+			var h: Fighter = nearest_hero(d.cell)
+			if h != null and not d.is_rooted(n):
+				_step_toward(d, h.cell, false)
+		DRAUGR_SLAM_STEP:
+			var around: Array[Vector2i] = []
+			for dir: Rune.Dir in Rune.ALL:
+				var c: Vector2i = d.cell + dir_offset(dir)
+				if in_bounds(c):
+					around.append(c)
+			flashed.emit(around, STRIKE_COLOR, "SLAM")
+			_log("The Draugr slams the ground")
+			for h: Fighter in heroes:
+				if h.cell in around:
+					_hit_hero(h, d, n, SLAM_DAMAGE)
+
+
+## Steps `d` one zone toward `goal`. `align` tries the shorter axis first
+## (to come in line while keeping distance); otherwise the longer one (to
+## close in). Falls back to the other axis, then a sidestep.
+func _step_toward(d: Dummy, goal: Vector2i, align: bool) -> bool:
+	var dx: int = goal.x - d.cell.x
+	var dy: int = goal.y - d.cell.y
+	var horiz := Vector2i(signi(dx), 0)
+	var vert := Vector2i(0, signi(dy))
+	var tries: Array[Vector2i] = []
+	if dx != 0 and dy != 0:
+		var shorter_vert: bool = absi(dy) <= absi(dx)
+		tries.assign([vert, horiz] if shorter_vert == align else [horiz, vert])
+	else:
+		tries.append(horiz + vert)
+		# Stuck behind something in line: step around it.
+		if dx == 0:
+			tries.append_array([Vector2i(-1, 0), Vector2i(1, 0)])
+		else:
+			tries.append_array([Vector2i(0, -1), Vector2i(0, 1)])
+	for t: Vector2i in tries:
+		if t != Vector2i.ZERO and is_free(d.cell + t):
+			d.cell += t
+			return true
+	return false
+
+
+func _varg(d: Dummy, n: int) -> void:
+	if d.is_leaping(n):
+		_leap(d, n)
 		return
-	for attempt: int in 2:
-		var to: Vector2i = d.cell + Vector2i(d.walk_dir, 0)
-		if to.x >= d.min_col and to.x <= d.max_col and dummy_at(to) == null and not hero_at(to):
-			d.cell = to
-			return
-		d.walk_dir = -d.walk_dir
+	if n <= d.rest_until or d.is_rooted(n):
+		return
+	var h: Fighter = nearest_hero(d.cell)
+	if h != null and _manhattan(h.cell, d.cell) > 1:
+		_step_toward(d, h.cell, true)
+
+
+## Sets up a leap on beat `n` if a hero stands in line within LEAP_RANGE
+## with nothing between (rooted: only right next to it).
+func _plan_leap(d: Dummy, n: int) -> void:
+	d.leap_beat = NONE
+	if n <= d.rest_until:
+		return
+	var reach: int = 1 if d.is_rooted(n) else LEAP_RANGE
+	var best: int = -1
+	for i: int in heroes.size():
+		var c: Vector2i = heroes[i].cell
+		var dist: int = _manhattan(c, d.cell)
+		if (c.x != d.cell.x and c.y != d.cell.y) or dist > reach:
+			continue
+		if best != -1 and dist >= _manhattan(heroes[best].cell, d.cell):
+			continue
+		var step := Vector2i(signi(c.x - d.cell.x), signi(c.y - d.cell.y))
+		var clear: bool = true
+		for k: int in range(1, dist):
+			if not is_free(d.cell + step * k):
+				clear = false
+		if clear:
+			best = i
+	if best == -1:
+		return
+	var aim: Vector2i = heroes[best].cell
+	d.leap_beat = n
+	d.leap_target = best
+	d.leap_aim = aim
+	d.leap_dir = Vector2i(signi(aim.x - d.cell.x), signi(aim.y - d.cell.y))
+
+
+## The leap: along its line, up to LEAP_RANGE zones, landing next to where
+## the target hero ended up and biting. Anything in the way stops it (a
+## hero in the way gets bitten instead). An evading target is passed: the
+## Varg lands in the zone they left.
+func _leap(d: Dummy, n: int) -> void:
+	d.leap_beat = NONE
+	d.rest_until = n + 1
+	var h: Fighter = heroes[d.leap_target]
+	var from: Vector2i = d.cell
+	var at: Vector2i = from
+	var victim: Fighter = null
+	var path: Array[Vector2i] = []
+	if h.evade_beat == n:
+		_hit_hero(h, d, n, VARG_DAMAGE)
+		# Pass the hero and land in the zone they left (where it aimed).
+		for k: int in range(1, _manhattan(d.leap_aim, from) + 1):
+			var c: Vector2i = from + d.leap_dir * k
+			if c == h.cell:
+				path.append(c)
+				continue
+			if not is_free(c):
+				victim = first_hero_at(c)
+				break
+			at = c
+			path.append(c)
+	else:
+		for k: int in range(0, LEAP_RANGE + 1):
+			var c: Vector2i = from + d.leap_dir * k
+			if k > 0:
+				if not is_free(c):
+					victim = first_hero_at(c)
+					break
+				at = c
+				path.append(c)
+			if _manhattan(at, h.cell) == 1:
+				victim = h
+				break
+	d.cell = at
+	if not path.is_empty():
+		flashed.emit(path, LEAP_COLOR, "")
+	if victim != null:
+		_hit_hero(victim, d, n, VARG_DAMAGE)
+	elif h.evade_beat != n:
+		_log("The Varg leaps and snaps at nothing")
 
 
 func _strike_cycle(d: Dummy, n: int) -> void:
 	if d.strike_beat == n:
 		d.strike_beat = NONE
-		if d.kind == Dummy.Kind.ARCHER:
-			_loose(d, n)
-		else:
-			flashed.emit(d.targets, STRIKE_COLOR, "Swing")
-			for h: Fighter in heroes:
-				if h.cell in d.targets:
-					_hit_hero(h, d, n)
+		_loose(d, n)
 		return
 	if d.strike_beat == NONE and posmod(n - d.cycle_offset, STRIKE_CYCLE) == 0:
 		d.strike_beat = n + STRIKE_WINDUP
 		d.targets.clear()
-		if d.kind == Dummy.Kind.ARCHER:
-			for x: int in range(d.cell.x - 1, -1, -1):
-				d.targets.append(Vector2i(x, d.cell.y))
-		else:
-			for side: int in [LEFT, RIGHT]:
-				var c: Vector2i = d.cell + Vector2i(side, 0)
-				if in_bounds(c):
-					d.targets.append(c)
+		for x: int in range(d.cell.x - 1, -1, -1):
+			d.targets.append(Vector2i(x, d.cell.y))
 
 
 ## The Archer's arrow flies left down its lane and stops at the first hero
@@ -376,7 +563,7 @@ func _guards(h: Fighter, d: Dummy, n: int) -> bool:
 
 
 ## Resolves a hit from dummy `d` on `h`: "EVADE", "BLOCK" or "HIT".
-func _hit_hero(h: Fighter, d: Dummy, n: int) -> String:
+func _hit_hero(h: Fighter, d: Dummy, n: int, damage: int = STRIKE_DAMAGE) -> String:
 	if h.evade_beat == n:
 		flashed.emit([h.cell] as Array[Vector2i], EVADE_COLOR, "EVADE")
 		_log("%s evades the %s" % [h.display_name, d.display_name])
@@ -385,7 +572,7 @@ func _hit_hero(h: Fighter, d: Dummy, n: int) -> String:
 		flashed.emit([h.cell] as Array[Vector2i], BLOCK_COLOR, "BLOCK")
 		_log("%s blocks the %s" % [h.display_name, d.display_name])
 		return "BLOCK"
-	var dmg: float = STRIKE_DAMAGE * (EXPOSED_MULTIPLIER if h.is_exposed() else 1.0)
+	var dmg: float = damage * (EXPOSED_MULTIPLIER if h.is_exposed() else 1.0)
 	var lost: int = h.take_damage(roundi(dmg))
 	flashed.emit([h.cell] as Array[Vector2i], STRIKE_COLOR, "HIT %d" % lost)
 	_log("The %s hits %s for %d%s" % [d.display_name, h.display_name, lost, " (exposed!)" if h.is_exposed() else ""])
