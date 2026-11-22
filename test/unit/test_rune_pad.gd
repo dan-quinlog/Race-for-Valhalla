@@ -57,3 +57,26 @@ func test_runes_are_color_coded_and_pending_lights_up() -> void:
 	fill = pad.get_node("%Left").get_theme_stylebox("normal").bg_color
 	assert_eq(fill, Rune.COLORS[Rune.Dir.LEFT].darkened(RunePad.PENDING_DARKEN))
 	assert_eq(pad.fill_color(Rune.Dir.UP), Rune.COLORS[Rune.Dir.UP].darkened(RunePad.REST_DARKEN))
+
+
+func test_drag_reports_the_rune_under_the_finger_and_the_release() -> void:
+	await wait_process_frames(2)
+	watch_signals(pad)
+	pad.get_node("%Down").button_down.emit()
+	assert_true(pad.dragging)
+	pad.drag_to(pad.get_node("%Down").get_global_rect().get_center())
+	assert_signal_not_emitted(pad, "pointed", "still over the pressed rune")
+	pad.drag_to(pad.get_node("%Left").get_global_rect().get_center())
+	assert_signal_emitted_with_parameters(pad, "pointed", [Rune.Dir.LEFT])
+	pad.end_drag()
+	assert_signal_emitted(pad, "released")
+	assert_false(pad.dragging)
+
+
+func test_pointed_direction_is_outlined() -> void:
+	pad.show_pending(Rune.Dir.DOWN)
+	pad.show_pointed(Rune.Dir.LEFT)
+	var border: Color = pad.get_node("%Left").get_theme_stylebox("normal").border_color
+	assert_eq(border, Color(1, 1, 1))
+	pad.clear_pending()
+	assert_eq(pad.pointed_dir, -1)
