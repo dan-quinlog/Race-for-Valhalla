@@ -7,8 +7,8 @@ extends Control
 ## the dum, when the turn resolves. Input styles:
 ## - Touch: press a rune button and drag onto a direction (a tap uses the
 ##   rune's own direction).
-## - Chord (keyboard or gamepad): press a rune (arrow keys or I/J/K/L, or the
-##   face buttons) and hold a direction (WASD, or the d-pad). P2 is gamepad 2.
+## - Chord (keyboard or gamepad): press a rune (WASD, or the face buttons)
+##   and hold a direction (arrow keys or I/J/K/L, or the d-pad). P2 is gamepad 2.
 ## - Gallop (keyboard, an option): the rune key on the buh, then a direction
 ##   key before the dum, on the same four keys. P1 WASD, P2 the arrows, so
 ##   two players can share a keyboard. Gamepads always use chord.
@@ -19,12 +19,12 @@ enum KeyStyle { CHORD, GALLOP }
 
 const STAGE_SCENE: String = "res://scenes/stage.tscn"
 const LOG_LENGTH: int = 6
-const CHORD_HINTS: Array[String] = ["↑ / I", "↓ / K", "← / J", "→ / L"]
+const CHORD_HINTS: Array[String] = ["W", "S", "A", "D"]
 const GALLOP_HINTS_P1: Array[String] = ["W", "S", "A", "D"]
 const GALLOP_HINTS_P2: Array[String] = ["↑", "↓", "←", "→"]
 const GALLOP_HINTS_SOLO: Array[String] = ["W / ↑", "S / ↓", "A / ←", "D / →"]
 const PAD_HINTS: Array[String] = ["pad", "pad", "pad", "pad"]
-const HELP_CHORD: String = "Chord: press a rune (arrows or IJKL / face buttons) on the beat and hold a direction (WASD / d-pad). A rune alone uses its own direction. Touch: press a rune and drag."
+const HELP_CHORD: String = "Chord: press a rune (WASD / face buttons) on the beat and hold a direction (arrows or IJKL / d-pad). A rune alone uses its own direction. Touch: press a rune and drag."
 const HELP_GALLOP: String = "Gallop: rune key on the buh, direction key before the dum (P1 WASD, P2 arrows). A rune alone uses its own direction. Touch: press a rune and drag."
 
 var two_players: bool = false

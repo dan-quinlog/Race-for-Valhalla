@@ -25,7 +25,7 @@ func test_starts_solo_chord_hold_with_p2_hidden() -> void:
 	assert_false(lab.panels[1].visible)
 	assert_eq(lab.key_style, lab.KeyStyle.CHORD)
 	assert_eq(lab.charge_mode, TurnInput.ChargeMode.HOLD)
-	assert_string_contains(lab.panels[0].get_node("%RunePad").get_node("%Up").text, "↑ / I")
+	assert_string_contains(lab.panels[0].get_node("%RunePad").get_node("%Up").text, "[W]")
 
 
 func test_chord_rune_with_held_direction() -> void:
