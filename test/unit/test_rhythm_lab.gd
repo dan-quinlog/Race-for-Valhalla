@@ -132,3 +132,9 @@ func test_ekg_wave_peaks_on_buh() -> void:
 	assert_almost_eq(ekg.wave(0.0), 1.0, 0.05)
 	assert_lt(ekg.wave(ekg.period * 0.5), 0.05)
 	assert_gt(ekg.wave(0.0), ekg.wave(ekg.dum_delay))
+
+
+func test_arrow_is_drawn_where_it_stops() -> void:
+	lab.rules.end_turn(2)
+	lab.rules.end_turn(4)
+	assert_eq(lab.get_node("%Arena").shot_count(), 1)

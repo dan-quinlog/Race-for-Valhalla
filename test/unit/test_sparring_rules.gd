@@ -220,3 +220,64 @@ func test_dead_dummy_respawns_at_home() -> void:
 	assert_false(post.is_alive())
 	rules.end_turn(1 + SparringRules.RESPAWN_BEATS)
 	assert_true(post.is_alive())
+
+
+## Two heroes in the Archer's lane, P1 nearer the Archer.
+func _two_in_line() -> SparringRules.Fighter:
+	rules = SparringRules.new(2)
+	hero = rules.heroes[0]
+	var behind: SparringRules.Fighter = rules.heroes[1]
+	hero.cell = Vector2i(5, 1)
+	behind.cell = Vector2i(4, 1)
+	rules.end_turn(2)
+	rules.end_turn(3)
+	return behind
+
+
+func test_arrow_stops_at_the_first_hero() -> void:
+	var behind: SparringRules.Fighter = _two_in_line()
+	watch_signals(rules)
+	rules.end_turn(4)
+	assert_lt(hero.hp, SparringRules.HERO_HP)
+	assert_eq(behind.hp, SparringRules.HERO_HP)
+	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(7, 1), Vector2i(5, 1), "HIT"])
+
+
+func test_blocking_covers_the_hero_behind() -> void:
+	var behind: SparringRules.Fighter = _two_in_line()
+	watch_signals(rules)
+	_go(Rune.Dir.RIGHT, 4)
+	rules.end_turn(4)
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+	assert_eq(behind.hp, SparringRules.HERO_HP)
+	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(7, 1), Vector2i(5, 1), "BLOCK"])
+
+
+func test_evading_lets_the_arrow_fly_on_to_the_next() -> void:
+	var behind: SparringRules.Fighter = _two_in_line()
+	hero.cell = Vector2i(6, 1)
+	_cast(RuneCorner.Kind.PRAYER, 3)
+	_go(Rune.Dir.LEFT, 4)
+	assert_eq(hero.cell, Vector2i(5, 1))
+	watch_signals(rules)
+	rules.end_turn(4)
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+	assert_lt(behind.hp, SparringRules.HERO_HP)
+	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(7, 1), Vector2i(4, 1), "HIT"])
+
+
+func test_blocker_sharing_a_zone_covers_their_partner() -> void:
+	var behind: SparringRules.Fighter = _two_in_line()
+	behind.cell = Vector2i(5, 1)
+	rules.act(1, TurnAction.direction(Rune.Dir.RIGHT, 4))
+	rules.end_turn(4)
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+	assert_eq(behind.hp, SparringRules.HERO_HP)
+
+
+func test_empty_lane_arrow_flies_off_the_yard() -> void:
+	hero.cell = Vector2i(1, 0)
+	rules.end_turn(2)
+	watch_signals(rules)
+	rules.end_turn(4)
+	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(7, 1), Vector2i(-1, 1), "MISS"])

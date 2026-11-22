@@ -12,6 +12,9 @@ const ZONE_FILL := Color(1, 1, 1, 0.03)
 const BEAT_COLOR := Color(0.95, 0.8, 0.45)
 const BEAT_PULSE_TIME: float = 0.3
 const FLASH_TIME: float = 0.45
+## How long a loosed arrow stays drawn where it stopped.
+const SHOT_TIME: float = 0.8
+const SHOT_COLORS := {"HIT": Color(1.0, 0.35, 0.2), "BLOCK": Color(0.6, 0.8, 1.0), "MISS": Color(0.75, 0.72, 0.65)}
 const HERO_COLORS: Array[Color] = [Color(0.45, 0.7, 1.0), Color(1.0, 0.65, 0.3)]
 const DUMMY_COLOR := Color(0.6, 0.5, 0.38)
 const WALKER_COLOR := Color(0.55, 0.6, 0.5)
@@ -31,10 +34,13 @@ var rules: SparringRules:
 	set(value):
 		if rules != null and rules.flashed.is_connected(_on_flashed):
 			rules.flashed.disconnect(_on_flashed)
+			rules.shot.disconnect(_on_shot)
 		rules = value
 		_flashes.clear()
+		_shots.clear()
 		if rules != null:
 			rules.flashed.connect(_on_flashed)
+			rules.shot.connect(_on_shot)
 		queue_redraw()
 ## The beat that started last (on the buh).
 var beat_index: int = -1
@@ -42,6 +48,8 @@ var _beat_pulse: float = 0.0
 var _time: float = 0.0
 ## {cells, color, text, left}
 var _flashes: Array[Dictionary] = []
+## Arrows just loosed: {from, to, outcome, left}
+var _shots: Array[Dictionary] = []
 
 
 func on_beat(index: int) -> void:
@@ -51,6 +59,14 @@ func on_beat(index: int) -> void:
 
 func flash_count() -> int:
 	return _flashes.size()
+
+
+func shot_count() -> int:
+	return _shots.size()
+
+
+func _on_shot(from: Vector2i, to: Vector2i, outcome: String) -> void:
+	_shots.append({"from": from, "to": to, "outcome": outcome, "left": SHOT_TIME})
 
 
 func _on_flashed(cells: Array[Vector2i], color: Color, text: String) -> void:
@@ -63,6 +79,9 @@ func _process(delta: float) -> void:
 	for f: Dictionary in _flashes:
 		f.left -= delta
 	_flashes = _flashes.filter(func(f: Dictionary) -> bool: return f.left > 0.0)
+	for a: Dictionary in _shots:
+		a.left -= delta
+	_shots = _shots.filter(func(a: Dictionary) -> bool: return a.left > 0.0)
 	queue_redraw()
 
 
@@ -101,6 +120,25 @@ func _draw() -> void:
 			_draw_dummy(d, open_beat, font, text_size)
 	for h: SparringRules.Fighter in rules.heroes:
 		_draw_hero(h, open_beat, font, text_size)
+	for a: Dictionary in _shots:
+		_draw_shot(a)
+
+
+## An arrow from the Archer to where it stopped: the near edge of the zone it
+## hit or was blocked in (with a bar for a block), or off the left edge.
+func _draw_shot(a: Dictionary) -> void:
+	var fade: float = clampf(a.left / SHOT_TIME * 1.5, 0.0, 1.0)
+	var col: Color = SHOT_COLORS[a.outcome] * Color(1, 1, 1, fade)
+	var start: Vector2 = cell_rect(a.from).get_center() - Vector2(zone_size().x * 0.3, 0)
+	var tip := Vector2(0.0, start.y)
+	if a.to.x >= 0:
+		tip.x = cell_rect(a.to).end.x - zone_size().x * 0.12
+	draw_line(start, tip + Vector2(10, 0), col, 3.0)
+	draw_colored_polygon(PackedVector2Array([tip, tip + Vector2(14, -7), tip + Vector2(14, 7)]), col)
+	draw_line(start, start + Vector2(10, -6), col, 2.0)
+	draw_line(start, start + Vector2(10, 6), col, 2.0)
+	if a.outcome == "BLOCK":
+		draw_line(tip + Vector2(-4, -16), tip + Vector2(-4, 16), col, 5.0)
 
 
 func _draw_zone(cell: Vector2i) -> void:

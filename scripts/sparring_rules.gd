@@ -31,6 +31,9 @@ extends RefCounted
 signal logged(text: String)
 ## Zones to flash in the view, with a short label ("" for none).
 signal flashed(cells: Array[Vector2i], color: Color, text: String)
+## An arrow flew from `from` and stopped at `to` (column -1: off the yard).
+## `outcome` is "HIT", "BLOCK" or "MISS".
+signal shot(from: Vector2i, to: Vector2i, outcome: String)
 
 const COLS: int = 8
 const LANES: int = 3
@@ -344,32 +347,49 @@ func _strike_cycle(d: Dummy, n: int) -> void:
 					d.targets.append(c)
 
 
-## The Archer's arrow flies left down its lane and hits the first hero.
+## The Archer's arrow flies left down its lane and stops at the first hero
+## it reaches. A shield guarding that way blocks it there, so a blocker
+## covers everyone behind them (and anyone sharing their zone). A hero who
+## evades lets it fly past to the next one. With no one left, it flies off
+## the yard. Emits `shot` with where it stopped.
 func _loose(d: Dummy, n: int) -> void:
-	var first: Fighter = null
+	var line: Array[Fighter] = []
 	for h: Fighter in heroes:
-		if _threatens(d, h) and (first == null or h.cell.x > first.cell.x):
-			first = h
-	var path: Array[Vector2i] = []
-	for x: int in range(d.cell.x - 1, (first.cell.x if first != null else 0) - 1, -1):
-		path.append(Vector2i(x, d.cell.y))
-	flashed.emit(path, STRIKE_COLOR, "Arrow")
-	if first != null:
-		_hit_hero(first, d, n)
+		if _threatens(d, h):
+			line.append(h)
+	# Nearest the Archer first; in a shared zone, a blocker goes first.
+	line.sort_custom(func(a: Fighter, b: Fighter) -> bool: return a.cell.x > b.cell.x or (a.cell.x == b.cell.x and _guards(a, d, n) and not _guards(b, d, n)))
+	var end := Vector2i(-1, d.cell.y)
+	var outcome: String = "MISS"
+	for h: Fighter in line:
+		outcome = _hit_hero(h, d, n)
+		if outcome != "EVADE":
+			end = h.cell
+			break
+	if outcome == "EVADE":
+		outcome = "MISS"
+	shot.emit(d.cell, end, outcome)
 
 
-func _hit_hero(h: Fighter, d: Dummy, n: int) -> void:
-	var from_dir: int = _from_dir(d, h)
+func _guards(h: Fighter, d: Dummy, n: int) -> bool:
+	return h.guard_beat == n and h.guard_dir == _from_dir(d, h)
+
+
+## Resolves a hit from dummy `d` on `h`: "EVADE", "BLOCK" or "HIT".
+func _hit_hero(h: Fighter, d: Dummy, n: int) -> String:
 	if h.evade_beat == n:
+		flashed.emit([h.cell] as Array[Vector2i], EVADE_COLOR, "EVADE")
 		_log("%s evades the %s" % [h.display_name, d.display_name])
-		return
-	if h.guard_beat == n and h.guard_dir == from_dir:
+		return "EVADE"
+	if _guards(h, d, n):
 		flashed.emit([h.cell] as Array[Vector2i], BLOCK_COLOR, "BLOCK")
 		_log("%s blocks the %s" % [h.display_name, d.display_name])
-		return
+		return "BLOCK"
 	var dmg: float = STRIKE_DAMAGE * (EXPOSED_MULTIPLIER if h.is_exposed() else 1.0)
 	var lost: int = h.take_damage(roundi(dmg))
+	flashed.emit([h.cell] as Array[Vector2i], STRIKE_COLOR, "HIT %d" % lost)
 	_log("The %s hits %s for %d%s" % [d.display_name, h.display_name, lost, " (exposed!)" if h.is_exposed() else ""])
+	return "HIT"
 
 
 func _log(text: String) -> void:
