@@ -4,14 +4,8 @@ extends GridContainer
 ## each in its rune's color (Rune.COLORS). Works as on-screen touch controls
 ## and as the input display. While a command's first rune is pending, that
 ## rune lights up and the other buttons show what each follow-up would do.
-## Touch drags: after a rune is pressed, the pad reports which rune button
-## the finger (or mouse) is over (`pointed`) and when it's let go
-## (`released`). The one-beat prototype uses that as the direction.
-## `show_pointed` outlines the direction currently chosen.
 
 signal rune_pressed(dir: Rune.Dir)
-signal pointed(dir: Rune.Dir)
-signal released()
 
 const BASE_COLOR := Color(1, 1, 1)
 ## How dark a rune button's fill is at rest, and when its rune is pending.
@@ -31,11 +25,6 @@ var pending: int = CommandReader.NO_RUNE
 var final_labels: Array[String] = []
 ## Rune.Dir of the strongest final strike, highlighted.
 var final_best: int = -1
-## The direction a held rune points, outlined in white (-1 for none).
-var pointed_dir: int = -1
-## A rune button is held down (touch or mouse) and being dragged.
-var dragging: bool = false
-var _last_pointed: int = -1
 
 @onready var _buttons: Array[Button] = [%Up, %Down, %Left, %Right]
 @onready var _center: Label = %Center
@@ -64,48 +53,7 @@ func show_pending(first: Rune.Dir) -> void:
 
 func clear_pending() -> void:
 	pending = CommandReader.NO_RUNE
-	pointed_dir = -1
 	_refresh()
-
-
-## Outlines direction `d` as the one a held rune points.
-func show_pointed(d: int) -> void:
-	pointed_dir = d
-	_refresh()
-
-
-## The rune button under `global_pos`, or -1.
-func dir_at(global_pos: Vector2) -> int:
-	for d: Rune.Dir in Rune.ALL:
-		if _buttons[d].get_global_rect().has_point(global_pos):
-			return d
-	return -1
-
-
-## A drag moved to `global_pos`: reports a newly hovered rune button.
-func drag_to(global_pos: Vector2) -> void:
-	if not dragging:
-		return
-	var d: int = dir_at(global_pos)
-	if d >= 0 and d != _last_pointed:
-		_last_pointed = d
-		pointed.emit(d as Rune.Dir)
-
-
-func end_drag() -> void:
-	if not dragging:
-		return
-	dragging = false
-	released.emit()
-
-
-func _input(event: InputEvent) -> void:
-	if not dragging:
-		return
-	if event is InputEventMouseMotion:
-		drag_to(get_global_mouse_position())
-	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		end_drag()
 
 
 ## Shows the final strike options in place of the runes' roles.
@@ -170,10 +118,9 @@ func _refresh() -> void:
 		b.text = button_text(d)
 		b.modulate = _rest_color(d)
 		var lit: bool = d == pending and final_labels.is_empty()
-		var aimed: bool = d == pointed_dir and final_labels.is_empty()
 		var fill: Color = fill_color(d)
-		var border: Color = Color(1, 1, 1) if lit or aimed else Rune.COLORS[d]
-		var width: int = 6 if aimed else (4 if lit else 2)
+		var border: Color = Color(1, 1, 1) if lit else Rune.COLORS[d]
+		var width: int = 4 if lit else 2
 		b.add_theme_stylebox_override("normal", _style(fill, border, width))
 		b.add_theme_stylebox_override("hover", _style(fill.lightened(0.12), border, width))
 		b.add_theme_stylebox_override("pressed", _style(fill.lightened(0.3), border, width))
@@ -183,6 +130,4 @@ func _refresh() -> void:
 
 
 func _on_button_down(d: Rune.Dir) -> void:
-	dragging = true
-	_last_pointed = d
 	rune_pressed.emit(d)

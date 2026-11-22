@@ -3,39 +3,35 @@ extends Control
 ## prototype (TurnInput), with a training yard (SparringRules) to try the
 ## actions on.
 ##
-## Each beat takes one rune press, judged on the buh. The direction locks at
-## the dum, when the turn resolves. Input styles:
-## - Touch: press a rune button and drag onto a direction (a tap uses the
-##   rune's own direction).
-## - Chord (keyboard or gamepad): press a rune (WASD, or the face buttons)
-##   and hold a direction (arrow keys or I/J/K/L, or the d-pad). P2 is gamepad 2.
-## - Gallop (keyboard, an option): the rune key on the buh, then a direction
-##   key before the dum, on the same four keys. P1 WASD, P2 the arrows, so
-##   two players can share a keyboard. Gamepads always use chord.
-## Heavy charges in either HOLD or REPEAT mode (see TurnInput).
-## In single-player mode every input set drives P1.
+## Each beat takes one input, judged on its first press, and resolves at the
+## dum. A direction moves (or attacks a foe there). Two neighbouring
+## directions together cast the corner rune between them.
+## Bindings:
+## - Directions on both sets: WASD, the arrows, the d-pad and the face
+##   buttons all move, and runes come from chords (or the touch corners).
+## - Rune buttons: WASD / arrows / d-pad move, and Q/E/Z/C or the face
+##   buttons cast runes directly (chords still work).
+## P1 is WASD (+ Q/E/Z/C) and gamepad 1, P2 the arrows and gamepad 2. In
+## single-player mode every input set drives P1.
 
-enum KeyStyle { CHORD, GALLOP }
+enum Binding { DIRECTIONS, RUNE_BUTTONS }
 
 const STAGE_SCENE: String = "res://scenes/stage.tscn"
-const LOG_LENGTH: int = 6
-const CHORD_HINTS: Array[String] = ["W", "S", "A", "D"]
-const GALLOP_HINTS_P1: Array[String] = ["W", "S", "A", "D"]
-const GALLOP_HINTS_P2: Array[String] = ["↑", "↓", "←", "→"]
-const GALLOP_HINTS_SOLO: Array[String] = ["W / ↑", "S / ↓", "A / ←", "D / →"]
-const PAD_HINTS: Array[String] = ["pad", "pad", "pad", "pad"]
-const HELP_CHORD: String = "Chord: press a rune (WASD / face buttons) on the beat and hold a direction (arrows or IJKL / d-pad). A rune alone uses its own direction. Touch: press a rune and drag."
-const HELP_GALLOP: String = "Gallop: rune key on the buh, direction key before the dum (P1 WASD, P2 arrows). A rune alone uses its own direction. Touch: press a rune and drag."
+const LOG_LENGTH: int = 7
+const DIR_HINTS_P1: Array[String] = ["W", "S", "A", "D"]
+const DIR_HINTS_P2: Array[String] = ["↑", "↓", "←", "→"]
+const DIR_HINTS_SOLO: Array[String] = ["W / ↑", "S / ↓", "A / ←", "D / →"]
+const RUNE_HINTS_KEYS: Array[String] = ["Q", "E", "Z", "C"]
+const RUNE_HINTS_CHORD_P1: Array[String] = ["W+A", "W+D", "S+A", "S+D"]
+const RUNE_HINTS_CHORD_P2: Array[String] = ["↑+←", "↑+→", "↓+←", "↓+→"]
+const NO_HINTS: Array[String] = ["", "", "", ""]
+const HELP: String = "One input per beat, resolved at the dum. A direction moves you, or attacks a foe standing there. Two neighbouring directions together cast the rune between them: ↖ Prayer, ↗ Heavy, ↙ Trip, ↘ Flourish."
 
 var two_players: bool = false
-var key_style: KeyStyle = KeyStyle.CHORD
-var charge_mode: TurnInput.ChargeMode = TurnInput.ChargeMode.HOLD
+var binding: Binding = Binding.RUNE_BUTTONS
+var shields: bool = true
 var rules: SparringRules
 var log_lines: Array[String] = []
-## Per panel: the chord direction held down (-1 for none).
-var _held_dir: Array[int] = [-1, -1]
-## Per panel: the gallop key held as the press (-1 for none).
-var _gallop_key: Array[int] = [-1, -1]
 
 @onready var _clock: BeatClock = %BeatClock
 @onready var _ekg: EkgDisplay = %Ekg
@@ -46,8 +42,8 @@ var _gallop_key: Array[int] = [-1, -1]
 @onready var _window_ms: SpinBox = %WindowMs
 @onready var _perfect_ms: SpinBox = %PerfectMs
 @onready var _latency_ms: SpinBox = %LatencyMs
-@onready var _key_style: OptionButton = %KeyStyle
-@onready var _charge_mode: OptionButton = %ChargeMode
+@onready var _binding: OptionButton = %Binding
+@onready var _shield_toggle: CheckButton = %Shield
 @onready var _two_players_toggle: CheckButton = %TwoPlayers
 @onready var panels: Array[TurnPanel] = [%Player1, %Player2]
 
@@ -61,12 +57,13 @@ func _ready() -> void:
 	_clock.beat_closed.connect(_on_beat_closed)
 	for box: SpinBox in [_bpm, _window_ms, _perfect_ms, _latency_ms]:
 		box.value_changed.connect(_on_setting_changed)
-	_key_style.item_selected.connect(func(i: int) -> void: set_key_style(i as KeyStyle))
-	_charge_mode.item_selected.connect(func(i: int) -> void: set_charge_mode(i as TurnInput.ChargeMode))
+	_binding.item_selected.connect(_on_binding_selected)
+	_shield_toggle.toggled.connect(set_shields)
 	%RestartButton.pressed.connect(restart)
 	%StageButton.pressed.connect(open_stage)
 	_two_players_toggle.toggled.connect(set_two_players)
 	_two_players_toggle.visible = not OS.has_feature("mobile")
+	_help.text = HELP
 	set_two_players(false)
 
 
@@ -80,16 +77,15 @@ func restart() -> void:
 	_clock.input_latency = _latency_ms.value / 1000.0
 	_clock.start()
 	for p: TurnPanel in panels:
-		p.configure(_clock.period, window, perfect, charge_mode)
+		p.configure(_clock.period, window, perfect)
 	_ekg.configure(_clock.period, window, window, perfect)
-	rules = SparringRules.new(2 if two_players else 1)
+	rules = SparringRules.new(2 if two_players else 1, shields)
 	rules.logged.connect(_on_logged)
 	_arena.rules = rules
 	_arena.beat_index = -1
 	log_lines.clear()
 	_log.text = ""
-	_held_dir = [-1, -1]
-	_gallop_key = [-1, -1]
+	_refresh_status()
 	for box: SpinBox in [_bpm, _window_ms, _perfect_ms, _latency_ms]:
 		box.get_line_edit().release_focus()
 
@@ -103,30 +99,28 @@ func set_two_players(on: bool) -> void:
 	restart()
 
 
-func set_key_style(style: KeyStyle) -> void:
-	key_style = style
-	if _key_style.selected != style:
-		_key_style.select(style)
+func set_binding(b: Binding) -> void:
+	binding = b
+	if _binding.selected != b:
+		_binding.select(b)
 	_refresh_hints()
-	restart()
 
 
-func set_charge_mode(mode: TurnInput.ChargeMode) -> void:
-	charge_mode = mode
-	if _charge_mode.selected != mode:
-		_charge_mode.select(mode)
+func set_shields(on: bool) -> void:
+	shields = on
+	if _shield_toggle.button_pressed != on:
+		_shield_toggle.set_pressed_no_signal(on)
 	restart()
 
 
 func _refresh_hints() -> void:
-	if key_style == KeyStyle.CHORD:
-		panels[0].set_key_hints(CHORD_HINTS)
-		panels[1].set_key_hints(PAD_HINTS)
-		_help.text = HELP_CHORD
+	var runes_on_keys: bool = binding == Binding.RUNE_BUTTONS
+	if two_players:
+		panels[0].set_hints(DIR_HINTS_P1, RUNE_HINTS_KEYS if runes_on_keys else RUNE_HINTS_CHORD_P1)
+		panels[1].set_hints(DIR_HINTS_P2, RUNE_HINTS_CHORD_P2)
 	else:
-		panels[0].set_key_hints(GALLOP_HINTS_P1 if two_players else GALLOP_HINTS_SOLO)
-		panels[1].set_key_hints(GALLOP_HINTS_P2)
-		_help.text = HELP_GALLOP
+		panels[0].set_hints(DIR_HINTS_SOLO, RUNE_HINTS_KEYS if runes_on_keys else RUNE_HINTS_CHORD_P1)
+		panels[1].set_hints(DIR_HINTS_P2, NO_HINTS)
 
 
 func open_stage() -> void:
@@ -148,78 +142,27 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and key_style == KeyStyle.GALLOP:
-		for ip: int in 2:
-			for d: Rune.Dir in Rune.ALL:
-				var action: StringName = Rune.action_name(ip, d)
-				if event.is_action_pressed(action) or event.is_action_released(action):
-					gallop_key(ip, d, event.is_pressed(), _clock.input_time())
+	var t: float = _clock.input_time()
+	for ip: int in 2:
+		if binding == Binding.RUNE_BUTTONS:
+			for k: RuneCorner.Kind in RuneCorner.ALL:
+				if event.is_action_pressed(RuneCorner.action_name(ip, k)):
+					press_rune(ip, k, t)
 					get_viewport().set_input_as_handled()
 					return
-		return
-	for ip: int in 2:
 		for d: Rune.Dir in Rune.ALL:
-			var rune_action := StringName("p%d_rune_%s" % [ip + 1, Rune.ACTION_SUFFIXES[d]])
-			var dir_action := StringName("p%d_dir_%s" % [ip + 1, Rune.ACTION_SUFFIXES[d]])
-			if event.is_action_pressed(rune_action) or event.is_action_released(rune_action):
-				chord_rune(ip, d, event.is_pressed(), _clock.input_time())
-			elif event.is_action_pressed(dir_action) or event.is_action_released(dir_action):
-				chord_dir(ip, d, event.is_pressed())
-			else:
-				continue
-			get_viewport().set_input_as_handled()
-			return
+			if event.is_action_pressed(Rune.action_name(ip, d)):
+				press_dir(ip, d, t)
+				get_viewport().set_input_as_handled()
+				return
 
 
-## Chord: a rune button went down or up.
-func chord_rune(input_player: int, d: Rune.Dir, down: bool, t: float) -> void:
-	var p: int = panel_for_input(input_player)
-	if not down:
-		panels[p].release(t)
-		return
-	panels[p].press(d, t)
-	if _held_dir[p] >= 0:
-		panels[p].point(_held_dir[p] as Rune.Dir)
+func press_dir(input_player: int, d: Rune.Dir, t: float) -> void:
+	panels[panel_for_input(input_player)].press_dir(d, t)
 
 
-## Chord: a direction went down or up. The held direction steers the open press.
-func chord_dir(input_player: int, d: Rune.Dir, down: bool) -> void:
-	var p: int = panel_for_input(input_player)
-	if down:
-		_held_dir[p] = d
-		panels[p].point(d)
-	elif _held_dir[p] == d:
-		_held_dir[p] = -1
-
-
-## Gallop: the first key on a beat is the rune, a second key before the dum
-## is the direction. A key just after the dum that was meant as a direction
-## is ignored instead of counting as a missed press.
-func gallop_key(input_player: int, d: Rune.Dir, down: bool, t: float) -> void:
-	var p: int = panel_for_input(input_player)
-	var input: TurnInput = panels[p].input
-	if not down:
-		if _gallop_key[p] == d:
-			_gallop_key[p] = -1
-			panels[p].release(t)
-		return
-	if input.rune != TurnInput.NO_RUNE:
-		panels[p].point(d)
-		_gallop_key[p] = d
-		return
-	if _is_late_direction(input, t):
-		return
-	panels[p].press(d, t)
-	_gallop_key[p] = d
-
-
-## True if `t` falls just after a beat's dum (within one window of it),
-## where a gallop key is a late direction rather than a new press.
-static func _is_late_direction(input: TurnInput, t: float) -> bool:
-	var period: float = input.judge.period
-	var window: float = input.judge.window
-	var since_buh: float = fposmod(t, period)
-	return since_buh > window and since_buh <= window * 2.0
+func press_rune(input_player: int, k: RuneCorner.Kind, t: float) -> void:
+	panels[panel_for_input(input_player)].press_rune(k, t)
 
 
 func _on_beat(index: int) -> void:
@@ -232,10 +175,21 @@ func _on_beat_closed(index: int) -> void:
 		if p == 0 or two_players:
 			panels[p].close_beat(index)
 	rules.end_turn(index)
+	_refresh_status()
 
 
-func _on_acted(action: RuneAction, player: int) -> void:
+func _on_acted(action: TurnAction, player: int) -> void:
 	rules.act(player, action)
+
+
+func _refresh_status() -> void:
+	for h: SparringRules.Fighter in rules.heroes:
+		var bits: Array[String] = ["Glory %d" % h.glory, "HP %d" % h.hp]
+		if h.blessed:
+			bits.append("Blessed")
+		if h.charge > 0:
+			bits.append("Heavy x%d" % h.charge)
+		panels[h.player].set_status("   ".join(bits))
 
 
 func _on_judged(t: float, grade: BeatJudge.Grade, player: int) -> void:
@@ -247,6 +201,10 @@ func _on_logged(text: String) -> void:
 	if log_lines.size() > LOG_LENGTH:
 		log_lines.pop_back()
 	_log.text = "\n".join(log_lines)
+
+
+func _on_binding_selected(index: int) -> void:
+	set_binding(index as Binding)
 
 
 func _on_setting_changed(_value: float) -> void:

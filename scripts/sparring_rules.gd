@@ -2,27 +2,34 @@ class_name SparringRules
 extends RefCounted
 ## The Rhythm Lab's training yard for the one-action-per-beat rules. Pure
 ## logic on beat indices. Heroes and practice dummies stand on a grid of
-## LANES by COLS zones, one dummy per zone. Heroes may share a zone with each
-## other, but not with a dummy.
+## LANES by COLS zones. Nothing shares a zone with a dummy; heroes may share
+## with each other.
 ##
-## - Facing: heroes face left or right. Moving or bracing left/right turns
-##   them that way (even when the move is blocked).
-## - Standard and Heavy hit the zone in front plus the zones above and below
-##   the hero. Trip and Defensive hit only the zone in front.
-## - Trip roots the dummy (it can't move this beat or the next) and makes it
-##   vulnerable (+50% damage) through the two beats after, so Trip, charge,
-##   Heavy lands on a vulnerable target.
-## - Heavy charges first (TurnInput). The hero is exposed (+50% damage taken)
-##   on every charging beat and the beat it lands.
-## - A brace covers only the beat it's made on. It blocks hits from the side
-##   it faces. A blessed brace strikes back.
-## - Defensive halves the next hit taken.
+## - A direction moves the hero, or attacks the dummy standing there (the
+##   hero stays put). Left/right also turns the hero to face that way.
+## - With a shield, a move or attack also guards that direction for the
+##   beat. If a hit from that side lands on the hero this beat, the hero
+##   blocks it and stays put instead of moving. Without a shield the hero
+##   moves and takes the hit. Area hits on the hero's zone can't be blocked.
+## - Corner runes (RuneCorner):
+##   - Prayer blesses the next action. A blessed move evades: it moves and
+##     takes no damage that beat. A blessed attack that kills earns bonus
+##     glory (no extra damage).
+##   - Heavy adds a charge (up to MAX_CHARGE), each +50% on the next basic
+##     attack. The hero is exposed (+50% damage taken) while charged.
+##   - Prayer and Heavy are charge-style: they don't use up or cancel each
+##     other, and a skipped beat keeps both. A move loses the charge, and
+##     any action other than those two uses up the blessing.
+##   - Trip hits the zone the hero faces, roots the dummy for that beat and
+##     the next, and makes it vulnerable (+50%) for the two beats after.
+##   - Flourish hits all four zones around the hero at once.
+##   Trip and Flourish lose the Heavy charge and don't guard.
 ##
-## Hero actions resolve first (act), then the dummies (end_turn), so a brace
-## or dodge on the hit beat counts.
+## Hero actions resolve first (act), then the dummies (end_turn), so a move
+## or block on the hit beat counts.
 
 signal logged(text: String)
-## Zones an attack (or a dummy's strike) hit, for the view to flash.
+## Zones to flash in the view, with a short label ("" for none).
 signal flashed(cells: Array[Vector2i], color: Color, text: String)
 
 const COLS: int = 8
@@ -31,70 +38,72 @@ const NONE: int = -(1 << 62)
 const LEFT: int = -1
 const RIGHT: int = 1
 
-const STANDARD_DAMAGE: int = 10
-const HEAVY_DAMAGE: int = 20
+const BASIC_DAMAGE: int = 10
 const TRIP_DAMAGE: int = 4
-const DEFENSIVE_DAMAGE: int = 6
-const RETALIATE_DAMAGE: int = 10
-## Perfect, blessed and vulnerable each multiply damage by this.
+const FLOURISH_DAMAGE: int = 6
+const MAX_CHARGE: int = 3
+## Extra damage per Heavy charge on the next basic attack.
+const CHARGE_BONUS: float = 0.5
+## Perfect and vulnerable each multiply damage by this.
 const BONUS: float = 1.5
 const EXPOSED_MULTIPLIER: float = 1.5
-## Beats after a Trip the dummy stays rooted (the Trip's own beat counts too).
 const ROOT_BEATS: int = 1
-## Beats after a Trip the dummy takes extra damage.
 const VULNERABLE_BEATS: int = 2
+const KILL_GLORY: int = 3
+const BLESSED_KILL_GLORY: int = 5
 
 const HERO_HP: int = 100
 const DUMMY_HP: int = 40
 const RESPAWN_BEATS: int = 4
-## The sparring dummy starts a wind-up every SPAR_CYCLE beats and strikes
-## SPAR_WINDUP beats later.
-const SPAR_CYCLE: int = 4
-const SPAR_WINDUP: int = 2
-const SPAR_DAMAGE: int = 10
+## Each striking dummy starts a wind-up every STRIKE_CYCLE beats (at its
+## offset) and strikes STRIKE_WINDUP beats later.
+const STRIKE_CYCLE: int = 4
+const STRIKE_WINDUP: int = 2
+const STRIKE_DAMAGE: int = 10
 
 const ATTACK_COLOR := Color(0.92, 0.25, 0.2)
-const SPAR_COLOR := Color(1.0, 0.55, 0.15)
+const STRIKE_COLOR := Color(1.0, 0.55, 0.15)
+const BLOCK_COLOR := Color(0.6, 0.8, 1.0)
+const EVADE_COLOR := Color(1.0, 0.85, 0.3)
 
 
 class Fighter extends Combatant:
 	var player: int
 	var facing: int = RIGHT
-	## The beat a brace covers, or NONE.
-	var brace_beat: int = NONE
-	var brace_dir: int = Rune.Dir.RIGHT
-	var brace_blessed: bool = false
-	## The last beat the hero is exposed on (charging or landing a Heavy).
-	var exposed_beat: int = NONE
-	var charging: bool = false
-	## The next hit taken is halved (Defensive attack).
-	var guarded: bool = false
+	var glory: int = 0
+	var blessed: bool = false
+	var charge: int = 0
+	## The beat a shield guards on, and the Rune.Dir it guards.
+	var guard_beat: int = NONE
+	var guard_dir: int = Rune.Dir.RIGHT
+	## The beat a blessed move evades on.
+	var evade_beat: int = NONE
 
 	func _init(p_player: int, p_cell: Vector2i) -> void:
 		super("P%d" % (p_player + 1), HERO_HP, p_cell)
 		player = p_player
 
-	func is_braced(beat: int) -> bool:
-		return brace_beat == beat
-
-	func is_exposed(beat: int) -> bool:
-		return exposed_beat == beat
+	func is_exposed() -> bool:
+		return charge > 0
 
 
 class Dummy extends Combatant:
-	enum Kind { POST, WALKER, SPARRER }
+	enum Kind { POST, WALKER, SPARRER, ARCHER }
 	var kind: Kind
 	var home: Vector2i
-	## WALKER: the way it's walking (LEFT or RIGHT), between min_col and max_col.
+	## WALKER: the way it's walking, between min_col and max_col.
 	var walk_dir: int = LEFT
 	var min_col: int = 0
 	var max_col: int = COLS - 1
 	var rooted_until: int = NONE
 	var vulnerable_until: int = NONE
 	var died_on: int = NONE
-	## SPARRER: the beat its strike lands, or NONE, and the zones it hits.
+	## SPARRER / ARCHER: the beat its strike lands, or NONE, and the zones
+	## it threatens.
 	var strike_beat: int = NONE
 	var targets: Array[Vector2i] = []
+	## Which beat of STRIKE_CYCLE its wind-up starts on.
+	var cycle_offset: int = 0
 
 	func _init(p_name: String, p_kind: Kind, p_cell: Vector2i) -> void:
 		super(p_name, DUMMY_HP, p_cell)
@@ -110,11 +119,14 @@ class Dummy extends Combatant:
 
 var heroes: Array[Fighter] = []
 var dummies: Array[Dummy] = []
+## Heroes carry a shield.
+var shields: bool = true
 ## The last beat end_turn ran for.
 var beat: int = NONE
 
 
-func _init(player_count: int = 1) -> void:
+func _init(player_count: int = 1, p_shields: bool = true) -> void:
+	shields = p_shields
 	for p: int in player_count:
 		heroes.append(Fighter.new(p, Vector2i(1, 1 + p)))
 	dummies.append(Dummy.new("Post", Dummy.Kind.POST, Vector2i(3, 1)))
@@ -123,6 +135,9 @@ func _init(player_count: int = 1) -> void:
 	walker.max_col = 6
 	dummies.append(walker)
 	dummies.append(Dummy.new("Sparrer", Dummy.Kind.SPARRER, Vector2i(6, 2)))
+	var archer := Dummy.new("Archer", Dummy.Kind.ARCHER, Vector2i(7, 1))
+	archer.cycle_offset = 2
+	dummies.append(archer)
 
 
 static func in_bounds(cell: Vector2i) -> bool:
@@ -140,15 +155,8 @@ static func dir_offset(d: int) -> Vector2i:
 	return Vector2i(1, 0)
 
 
-## The zones an attack from `hero` hits.
-static func attack_cells(hero: Fighter, attack: RuneAction.Attack) -> Array[Vector2i]:
-	var out: Array[Vector2i] = [hero.cell + Vector2i(hero.facing, 0)]
-	if attack == RuneAction.Attack.STANDARD or attack == RuneAction.Attack.HEAVY:
-		out.append(hero.cell + Vector2i(0, -1))
-		out.append(hero.cell + Vector2i(0, 1))
-	var inside: Array[Vector2i] = []
-	inside.assign(out.filter(func(c: Vector2i) -> bool: return in_bounds(c)))
-	return inside
+static func facing_dir(facing: int) -> Rune.Dir:
+	return Rune.Dir.LEFT if facing == LEFT else Rune.Dir.RIGHT
 
 
 func dummy_at(cell: Vector2i) -> Dummy:
@@ -166,79 +174,115 @@ func hero_at(cell: Vector2i) -> bool:
 
 
 ## Resolves one hero action for its beat.
-func act(player: int, a: RuneAction) -> void:
+func act(player: int, a: TurnAction) -> void:
 	if player >= heroes.size() or a == null:
 		return
 	var h: Fighter = heroes[player]
-	h.charging = a.kind == RuneAction.Kind.CHARGE
-	match a.kind:
-		RuneAction.Kind.MOVE:
-			_move(h, a)
-		RuneAction.Kind.BRACE:
-			h.brace_beat = a.beat
-			h.brace_dir = a.dir
-			h.brace_blessed = a.empowered
-			if a.dir == Rune.Dir.LEFT or a.dir == Rune.Dir.RIGHT:
-				h.facing = LEFT if a.dir == Rune.Dir.LEFT else RIGHT
-			_log("%s braces %s" % [h.display_name, Rune.DIR_NAMES[a.dir]])
-		RuneAction.Kind.ATTACK:
-			_attack(h, a)
-		RuneAction.Kind.CHARGE:
-			h.exposed_beat = a.beat
-			_log("%s charges a Heavy (exposed)" % h.display_name)
-		RuneAction.Kind.PRAY:
-			_log("%s: %s" % [h.display_name, a.describe()])
+	if a.kind == TurnAction.Kind.DIRECTION:
+		_direction(h, a)
+		return
+	match a.rune:
+		RuneCorner.Kind.PRAYER:
+			h.blessed = true
+			_log("%s prays: the next action is blessed" % h.display_name)
+		RuneCorner.Kind.HEAVY:
+			h.charge = mini(MAX_CHARGE, h.charge + 1)
+			_log("%s charges a Heavy (x%d, exposed)" % [h.display_name, h.charge])
+		RuneCorner.Kind.TRIP:
+			h.charge = 0
+			var front: Vector2i = h.cell + Vector2i(h.facing, 0)
+			_strike(h, [front], TRIP_DAMAGE, a, "Trip", true)
+		RuneCorner.Kind.FLOURISH:
+			h.charge = 0
+			var around: Array[Vector2i] = []
+			for d: Rune.Dir in Rune.ALL:
+				around.append(h.cell + dir_offset(d))
+			_strike(h, around, FLOURISH_DAMAGE, a, "Flourish", false)
 
 
-func _move(h: Fighter, a: RuneAction) -> void:
-	if a.dir == Rune.Dir.LEFT:
-		h.facing = LEFT
-	elif a.dir == Rune.Dir.RIGHT:
-		h.facing = RIGHT
-	var to: Vector2i = h.cell + dir_offset(a.dir)
+func _direction(h: Fighter, a: TurnAction) -> void:
+	var d: int = a.dir
+	if d == Rune.Dir.LEFT or d == Rune.Dir.RIGHT:
+		h.facing = LEFT if d == Rune.Dir.LEFT else RIGHT
+	if shields:
+		h.guard_beat = a.beat
+		h.guard_dir = d
+	var to: Vector2i = h.cell + dir_offset(d)
+	if dummy_at(to) != null:
+		var dmg: float = BASIC_DAMAGE * (1.0 + CHARGE_BONUS * h.charge)
+		var label: String = "Attack" if h.charge == 0 else "Heavy x%d" % h.charge
+		h.charge = 0
+		_strike(h, [to], dmg, a, label, false)
+		return
+	h.charge = 0
+	if h.blessed:
+		h.blessed = false
+		h.evade_beat = a.beat
+		flashed.emit([h.cell] as Array[Vector2i], EVADE_COLOR, "EVADE")
+		_step(h, to)
+		return
+	if shields and _hit_coming(h, a.beat, d):
+		flashed.emit([h.cell] as Array[Vector2i], BLOCK_COLOR, "BLOCK")
+		_log("%s holds the shield up and stands firm" % h.display_name)
+		return
+	_step(h, to)
+
+
+func _step(h: Fighter, to: Vector2i) -> void:
 	if not in_bounds(to) or dummy_at(to) != null:
-		_log("%s can't move %s" % [h.display_name, Rune.DIR_NAMES[a.dir]])
+		_log("%s can't move there" % h.display_name)
 		return
 	h.cell = to
 
 
-func _attack(h: Fighter, a: RuneAction) -> void:
-	var cells: Array[Vector2i] = attack_cells(h, a.attack)
-	var base: int = STANDARD_DAMAGE
-	match a.attack:
-		RuneAction.Attack.HEAVY:
-			base = HEAVY_DAMAGE
-			h.exposed_beat = a.beat
-		RuneAction.Attack.TRIP:
-			base = TRIP_DAMAGE
-		RuneAction.Attack.DEFENSIVE:
-			base = DEFENSIVE_DAMAGE
-			h.guarded = true
+## Deals `base` (before bonuses) to each dummy in `cells`. Uses up the
+## blessing: a kill with it earns bonus glory.
+func _strike(h: Fighter, cells: Array[Vector2i], base: float, a: TurnAction, label: String, trip: bool) -> void:
+	var blessed: bool = h.blessed
+	h.blessed = false
+	var inside: Array[Vector2i] = []
+	inside.assign(cells.filter(func(c: Vector2i) -> bool: return in_bounds(c)))
 	var parts: Array[String] = []
-	for cell: Vector2i in cells:
+	for cell: Vector2i in inside:
 		var d: Dummy = dummy_at(cell)
 		if d == null:
 			continue
-		var mult: float = 1.0
-		if a.perfect:
-			mult *= BONUS
-		if a.empowered:
-			mult *= BONUS
+		var mult: float = BONUS if a.perfect else 1.0
 		if d.is_vulnerable(a.beat):
 			mult *= BONUS
 		var dealt: int = d.take_damage(roundi(base * mult))
 		var note: String = "%s %d" % [d.display_name, dealt]
-		if a.attack == RuneAction.Attack.TRIP:
+		if trip:
 			d.rooted_until = a.beat + ROOT_BEATS
 			d.vulnerable_until = a.beat + VULNERABLE_BEATS
 			note += " (rooted, vulnerable)"
 		if not d.is_alive():
 			d.died_on = a.beat
-			note += " (down!)"
+			var glory: int = KILL_GLORY + (BLESSED_KILL_GLORY if blessed else 0)
+			h.glory += glory
+			note += " (down! +%d glory)" % glory
 		parts.append(note)
-	flashed.emit(cells, ATTACK_COLOR, RuneAction.ATTACK_NAMES[a.attack])
-	var text: String = "%s: %s" % [h.display_name, a.describe()]
+	flashed.emit(inside, ATTACK_COLOR, label)
+	var text: String = "%s: %s%s" % [h.display_name, label, " PERFECT" if a.perfect else ""]
 	_log(text + (" -> " + ", ".join(parts) if not parts.is_empty() else " -> nothing there"))
+
+
+## True if a hit from direction `d` lands on `h`'s zone this beat.
+func _hit_coming(h: Fighter, n: int, d: int) -> bool:
+	for dummy: Dummy in dummies:
+		if dummy.is_alive() and dummy.strike_beat == n and _threatens(dummy, h) and _from_dir(dummy, h) == d:
+			return true
+	return false
+
+
+func _threatens(dummy: Dummy, h: Fighter) -> bool:
+	if dummy.kind == Dummy.Kind.ARCHER:
+		return h.cell.y == dummy.cell.y and h.cell.x < dummy.cell.x
+	return h.cell in dummy.targets
+
+
+static func _from_dir(dummy: Dummy, h: Fighter) -> int:
+	return Rune.Dir.RIGHT if dummy.cell.x > h.cell.x else Rune.Dir.LEFT
 
 
 ## Beat `n` closed: the dummies act, after the heroes.
@@ -257,8 +301,8 @@ func end_turn(n: int) -> void:
 		match d.kind:
 			Dummy.Kind.WALKER:
 				_walk(d, n)
-			Dummy.Kind.SPARRER:
-				_spar(d, n)
+			Dummy.Kind.SPARRER, Dummy.Kind.ARCHER:
+				_strike_cycle(d, n)
 	for h: Fighter in heroes:
 		if h.hp <= 0:
 			h.hp = h.max_hp
@@ -276,42 +320,56 @@ func _walk(d: Dummy, n: int) -> void:
 		d.walk_dir = -d.walk_dir
 
 
-func _spar(d: Dummy, n: int) -> void:
+func _strike_cycle(d: Dummy, n: int) -> void:
 	if d.strike_beat == n:
 		d.strike_beat = NONE
-		flashed.emit(d.targets, SPAR_COLOR, "Swing")
-		for h: Fighter in heroes:
-			if h.cell in d.targets:
-				_hit_hero(h, d, n)
+		if d.kind == Dummy.Kind.ARCHER:
+			_loose(d, n)
+		else:
+			flashed.emit(d.targets, STRIKE_COLOR, "Swing")
+			for h: Fighter in heroes:
+				if h.cell in d.targets:
+					_hit_hero(h, d, n)
 		return
-	if d.strike_beat == NONE and posmod(n, SPAR_CYCLE) == 0:
-		d.strike_beat = n + SPAR_WINDUP
+	if d.strike_beat == NONE and posmod(n - d.cycle_offset, STRIKE_CYCLE) == 0:
+		d.strike_beat = n + STRIKE_WINDUP
 		d.targets.clear()
-		for side: int in [LEFT, RIGHT]:
-			var c: Vector2i = d.cell + Vector2i(side, 0)
-			if in_bounds(c):
-				d.targets.append(c)
+		if d.kind == Dummy.Kind.ARCHER:
+			for x: int in range(d.cell.x - 1, -1, -1):
+				d.targets.append(Vector2i(x, d.cell.y))
+		else:
+			for side: int in [LEFT, RIGHT]:
+				var c: Vector2i = d.cell + Vector2i(side, 0)
+				if in_bounds(c):
+					d.targets.append(c)
+
+
+## The Archer's arrow flies left down its lane and hits the first hero.
+func _loose(d: Dummy, n: int) -> void:
+	var first: Fighter = null
+	for h: Fighter in heroes:
+		if _threatens(d, h) and (first == null or h.cell.x > first.cell.x):
+			first = h
+	var path: Array[Vector2i] = []
+	for x: int in range(d.cell.x - 1, (first.cell.x if first != null else 0) - 1, -1):
+		path.append(Vector2i(x, d.cell.y))
+	flashed.emit(path, STRIKE_COLOR, "Arrow")
+	if first != null:
+		_hit_hero(first, d, n)
 
 
 func _hit_hero(h: Fighter, d: Dummy, n: int) -> void:
-	var from_dir: int = Rune.Dir.RIGHT if d.cell.x > h.cell.x else Rune.Dir.LEFT
-	if h.is_braced(n) and h.brace_dir == from_dir:
-		var text: String = "%s blocks the Sparrer" % h.display_name
-		if h.brace_blessed:
-			var dealt: int = d.take_damage(RETALIATE_DAMAGE)
-			text += " and strikes back for %d" % dealt
-			if not d.is_alive():
-				d.died_on = n
-		_log(text)
+	var from_dir: int = _from_dir(d, h)
+	if h.evade_beat == n:
+		_log("%s evades the %s" % [h.display_name, d.display_name])
 		return
-	var dmg: float = SPAR_DAMAGE
-	if h.is_exposed(n):
-		dmg *= EXPOSED_MULTIPLIER
-	if h.guarded:
-		dmg *= 0.5
-		h.guarded = false
+	if h.guard_beat == n and h.guard_dir == from_dir:
+		flashed.emit([h.cell] as Array[Vector2i], BLOCK_COLOR, "BLOCK")
+		_log("%s blocks the %s" % [h.display_name, d.display_name])
+		return
+	var dmg: float = STRIKE_DAMAGE * (EXPOSED_MULTIPLIER if h.is_exposed() else 1.0)
 	var lost: int = h.take_damage(roundi(dmg))
-	_log("The Sparrer hits %s for %d%s" % [h.display_name, lost, " (exposed!)" if h.is_exposed(n) else ""])
+	_log("The %s hits %s for %d%s" % [d.display_name, h.display_name, lost, " (exposed!)" if h.is_exposed() else ""])
 
 
 func _log(text: String) -> void:

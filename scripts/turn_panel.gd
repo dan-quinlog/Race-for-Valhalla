@@ -1,13 +1,11 @@
 class_name TurnPanel
 extends VBoxContainer
-## One player's rune pad and readout for the one-action-per-beat prototype
-## (TurnInput): judgment, combo, the action just taken, glory, blessings and
-## a short log. Touch: press a rune and drag to a direction (a tap uses the
-## rune's own direction). While a rune is held the pad lists what each
-## direction would do and outlines the chosen one.
+## One player's direction pad and readout for the one-action-per-beat
+## prototype (TurnInput): judgment, combo, the action just taken, a status
+## line the lab fills in (glory, blessing, charge) and a short log.
 
 signal judged(t: float, grade: BeatJudge.Grade, player: int)
-signal acted(action: RuneAction, player: int)
+signal acted(action: TurnAction, player: int)
 
 const LOG_LENGTH: int = 5
 
@@ -17,7 +15,7 @@ var clock: BeatClock
 var input: TurnInput
 var log_lines: Array[String] = []
 
-@onready var _pad: RunePad = %RunePad
+@onready var _pad: DirectionPad = %Pad
 @onready var _title: Label = %Title
 @onready var _judgment: Label = %JudgmentLabel
 @onready var _combo: Label = %ComboLabel
@@ -29,70 +27,63 @@ var log_lines: Array[String] = []
 func _ready() -> void:
 	_title.text = "Player %d" % (player_index + 1)
 	_pad.set_center_text("P%d" % (player_index + 1))
-	_pad.rune_pressed.connect(_on_pad_pressed)
-	_pad.pointed.connect(point)
-	_pad.released.connect(_on_pad_released)
+	_pad.direction_pressed.connect(_on_pad_direction)
+	_pad.rune_pressed.connect(_on_pad_rune)
 
 
-func configure(period: float, window: float, perfect_window: float, mode: TurnInput.ChargeMode) -> void:
+func configure(period: float, window: float, perfect_window: float) -> void:
 	if input == null:
-		input = TurnInput.new(period, window, perfect_window, mode)
+		input = TurnInput.new(period, window, perfect_window)
 	else:
-		input.configure(period, window, perfect_window, mode)
+		input.configure(period, window, perfect_window)
 	log_lines.clear()
-	_pad.clear_pending()
 	_judgment.text = "Press on the beat"
 	_action.text = ""
+	_status.text = ""
 	_refresh()
 
 
-func set_key_hints(hints: Array[String]) -> void:
-	_pad.set_key_hints(hints)
+func set_hints(dirs: Array[String], runes: Array[String]) -> void:
+	_pad.set_hints(dirs, runes)
 
 
-## A rune pressed at time `t`. Returns an action if it resolved right away
-## (a press that arrived after its beat had already closed).
-func press(rune: Rune.Dir, t: float) -> RuneAction:
-	var j: BeatJudge.Judgment = input.press(rune, t)
-	_pad.flash(rune, j.grade)
-	_judgment.text = PlayerPanel.describe(j)
-	judged.emit(t, j.grade, player_index)
-	var done: RuneAction = null
-	if j.grade != BeatJudge.Grade.MISS:
-		if input.press_fires_charge():
-			_action.text = "Heavy released!"
-		elif input.rune != TurnInput.NO_RUNE:
-			_pad.show_pending(rune)
-			_pad.show_pointed(rune)
-			if input.is_late():
-				done = _finish(input.resolve_late())
-	_refresh()
-	return done
+func set_status(text: String) -> void:
+	_status.text = text
 
 
-## Points the held rune in direction `d`.
-func point(d: Rune.Dir) -> void:
-	input.point(d)
-	if input.rune != TurnInput.NO_RUNE:
-		_pad.show_pointed(input.direction)
+func press_dir(d: Rune.Dir, t: float) -> void:
+	var j: BeatJudge.Judgment = input.press_dir(d, t)
+	if j == null:
+		if input.rune >= 0:
+			_pad.flash_rune(input.rune as RuneCorner.Kind, BeatJudge.Grade.GOOD)
+		return
+	_pad.flash_dir(d, j.grade)
+	_judged(j, t)
 
 
-func release(t: float) -> void:
-	input.release(t)
+func press_rune(k: RuneCorner.Kind, t: float) -> void:
+	var j: BeatJudge.Judgment = input.press_rune(k, t)
+	if j == null:
+		return
+	_pad.flash_rune(k, j.grade)
+	_judged(j, t)
 
 
-## Beat `n` closed: returns the action this player takes on it, or null.
-func close_beat(n: int) -> RuneAction:
+## Beat `n` closed: returns this player's action for it, or null.
+func close_beat(n: int) -> TurnAction:
 	return _finish(input.close_beat(n))
 
 
-func _finish(a: RuneAction) -> RuneAction:
-	_pad.clear_pending()
-	if input.charging:
-		_pad.show_pending(Rune.Dir.LEFT)
-		_pad.show_pointed(Rune.Dir.UP)
+func _judged(j: BeatJudge.Judgment, t: float) -> void:
+	_judgment.text = PlayerPanel.describe(j)
+	judged.emit(t, j.grade, player_index)
+	if input.is_late():
+		_finish(input.resolve_late())
+	_refresh()
+
+
+func _finish(a: TurnAction) -> TurnAction:
 	if a == null:
-		_refresh()
 		return null
 	_action.text = a.describe()
 	log_lines.push_front(_action.text)
@@ -107,20 +98,14 @@ func _refresh() -> void:
 	var combo: ComboTracker = input.combo
 	_combo.text = "Combo %d (best %d)   P %d  G %d  M %d" % [
 		combo.combo, combo.best, combo.perfects, combo.goods, combo.misses]
-	var blessed: Array[String] = []
-	for d: Rune.Dir in Rune.ALL:
-		if input.blessings[d]:
-			blessed.append(Rune.ROLES[d])
-	_status.text = "Glory %d   Blessed: %s" % [
-		input.glory, ", ".join(blessed) if not blessed.is_empty() else "none"]
 	_log.text = "\n".join(log_lines)
 
 
-func _on_pad_pressed(d: Rune.Dir) -> void:
+func _on_pad_direction(d: Rune.Dir) -> void:
 	if clock != null:
-		press(d, clock.input_time())
+		press_dir(d, clock.input_time())
 
 
-func _on_pad_released() -> void:
+func _on_pad_rune(k: RuneCorner.Kind) -> void:
 	if clock != null:
-		release(clock.input_time())
+		press_rune(k, clock.input_time())

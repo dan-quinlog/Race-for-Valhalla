@@ -20,84 +20,84 @@ func _presses(panel: TurnPanel) -> int:
 	return c.perfects + c.goods + c.misses
 
 
-func test_starts_solo_chord_hold_with_p2_hidden() -> void:
+func _event(action: StringName) -> InputEventAction:
+	var ev := InputEventAction.new()
+	ev.action = action
+	ev.pressed = true
+	return ev
+
+
+func test_starts_solo_with_rune_buttons_and_a_shield() -> void:
 	assert_false(lab.two_players)
 	assert_false(lab.panels[1].visible)
-	assert_eq(lab.key_style, lab.KeyStyle.CHORD)
-	assert_eq(lab.charge_mode, TurnInput.ChargeMode.HOLD)
-	assert_string_contains(lab.panels[0].get_node("%RunePad").get_node("%Up").text, "[W]")
+	assert_eq(lab.binding, lab.Binding.RUNE_BUTTONS)
+	assert_true(lab.rules.shields)
+	var pad: DirectionPad = lab.panels[0].get_node("%Pad")
+	assert_string_contains(pad.rune_button(RuneCorner.Kind.PRAYER).text, "[Q]")
+	assert_string_contains(pad.dir_button(Rune.Dir.UP).text, "W / ↑")
 
 
-func test_chord_rune_with_held_direction() -> void:
-	var t: float = _period() * 3
-	lab.chord_dir(0, Rune.Dir.LEFT, true)
-	lab.chord_rune(0, Rune.Dir.DOWN, true, t)
-	lab._on_beat_closed(3)
-	assert_eq(lab.rules.heroes[0].cell, Vector2i(0, 1))
-	assert_eq(lab.rules.heroes[0].facing, SparringRules.LEFT)
-
-
-func test_chord_direction_after_the_rune_steers_it() -> void:
-	lab.chord_rune(0, Rune.Dir.DOWN, true, _period() * 3)
-	lab.chord_dir(0, Rune.Dir.UP, true)
+func test_direction_moves_the_hero_at_the_dum() -> void:
+	lab.press_dir(0, Rune.Dir.UP, _period() * 3)
 	lab._on_beat_closed(3)
 	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 0))
 
 
+func test_chord_casts_the_rune() -> void:
+	var t: float = _period() * 3
+	lab.press_dir(0, Rune.Dir.UP, t)
+	lab.press_dir(0, Rune.Dir.RIGHT, t + 0.05)
+	lab._on_beat_closed(3)
+	assert_eq(lab.rules.heroes[0].charge, 1)
+	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 1))
+
+
+func test_rune_button_action_casts_directly() -> void:
+	lab._unhandled_input(_event(RuneCorner.action_name(0, RuneCorner.Kind.PRAYER)))
+	assert_eq(_presses(lab.panels[0]), 1)
+
+
+func test_directions_binding_ignores_rune_buttons() -> void:
+	lab.set_binding(lab.Binding.DIRECTIONS)
+	lab._unhandled_input(_event(RuneCorner.action_name(0, RuneCorner.Kind.PRAYER)))
+	assert_eq(_presses(lab.panels[0]), 0)
+	assert_string_contains(lab.panels[0].get_node("%Pad").rune_button(RuneCorner.Kind.PRAYER).text, "[W+A]")
+
+
 func test_solo_routes_both_input_sets_to_p1() -> void:
-	lab.chord_rune(0, Rune.Dir.LEFT, true, _period() * 2)
-	lab.chord_rune(1, Rune.Dir.LEFT, true, _period() * 3)
+	lab.press_dir(0, Rune.Dir.LEFT, _period() * 2)
+	lab._on_beat_closed(2)
+	lab.press_dir(1, Rune.Dir.LEFT, _period() * 3)
 	assert_eq(_presses(lab.panels[0]), 2)
 	assert_eq(_presses(lab.panels[1]), 0)
 
 
-func test_gallop_second_key_is_the_direction() -> void:
-	lab.set_key_style(lab.KeyStyle.GALLOP)
-	var t: float = _period() * 3
-	lab.gallop_key(0, Rune.Dir.DOWN, true, t)
-	lab.gallop_key(0, Rune.Dir.UP, true, t + 0.08)
-	assert_eq(_presses(lab.panels[0]), 1, "the direction key isn't a press")
-	lab._on_beat_closed(3)
-	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 0))
-
-
-func test_gallop_key_just_after_the_dum_is_ignored() -> void:
-	lab.set_key_style(lab.KeyStyle.GALLOP)
-	var t: float = _period() * 3
-	lab.gallop_key(0, Rune.Dir.DOWN, true, t)
-	lab._on_beat_closed(3)
-	lab.gallop_key(0, Rune.Dir.UP, true, t + lab.panels[0].input.judge.window + 0.05)
-	assert_eq(_presses(lab.panels[0]), 1)
-
-
-func test_two_players_gallop_on_one_keyboard() -> void:
-	lab.set_key_style(lab.KeyStyle.GALLOP)
+func test_two_players_on_one_keyboard() -> void:
 	lab.set_two_players(true)
 	assert_true(lab.panels[1].visible)
 	assert_eq(lab.rules.heroes.size(), 2)
-	lab.gallop_key(0, Rune.Dir.LEFT, true, _period() * 3)
-	lab.gallop_key(1, Rune.Dir.LEFT, true, _period() * 3)
-	assert_eq(_presses(lab.panels[0]), 1)
-	assert_eq(_presses(lab.panels[1]), 1)
-
-
-func test_hold_heavy_charges_then_fires_on_release() -> void:
-	var p: float = _period()
-	lab.chord_dir(0, Rune.Dir.UP, true)
-	lab.chord_rune(0, Rune.Dir.LEFT, true, p * 3)
+	lab.press_dir(0, Rune.Dir.UP, _period() * 3)
+	lab.press_dir(1, Rune.Dir.DOWN, _period() * 3)
 	lab._on_beat_closed(3)
-	assert_true(lab.rules.heroes[0].charging)
+	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 0))
+	assert_eq(lab.rules.heroes[1].cell, Vector2i(1, 2))
+
+
+func test_shield_toggle_rebuilds_the_yard() -> void:
+	lab.set_shields(false)
+	assert_false(lab.rules.shields)
+	assert_false(lab.get_node("%Shield").button_pressed)
+
+
+func test_status_shows_charge_and_blessing() -> void:
+	var t: float = _period() * 3
+	lab.press_rune(0, RuneCorner.Kind.HEAVY, t)
+	lab._on_beat_closed(3)
+	lab.press_rune(0, RuneCorner.Kind.PRAYER, t + _period())
 	lab._on_beat_closed(4)
-	lab.chord_rune(0, Rune.Dir.LEFT, false, p * 4.5)
-	lab._on_beat_closed(5)
-	assert_false(lab.rules.heroes[0].charging)
-	assert_true(lab.rules.heroes[0].is_exposed(5))
-
-
-func test_charge_mode_switch_reconfigures() -> void:
-	lab.set_charge_mode(TurnInput.ChargeMode.REPEAT)
-	assert_eq(lab.panels[0].input.charge_mode, TurnInput.ChargeMode.REPEAT)
-	assert_eq(lab.get_node("%ChargeMode").selected, TurnInput.ChargeMode.REPEAT)
+	var status: String = lab.panels[0].get_node("%StatusLabel").text
+	assert_string_contains(status, "Heavy x1")
+	assert_string_contains(status, "Blessed")
 
 
 func test_bpm_change_reconfigures_players() -> void:
@@ -114,9 +114,9 @@ func test_window_is_clamped_below_half_period() -> void:
 
 
 func test_attacks_flash_the_arena() -> void:
-	lab.chord_rune(0, Rune.Dir.LEFT, true, _period() * 3)
+	lab.press_rune(0, RuneCorner.Kind.FLOURISH, _period() * 3)
 	lab._on_beat_closed(3)
-	assert_eq(lab.get_node("%Arena").flash_count(), 1)
+	assert_gt(lab.get_node("%Arena").flash_count(), 0)
 
 
 func test_stage_button_opens_stage() -> void:

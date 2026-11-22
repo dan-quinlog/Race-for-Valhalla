@@ -1,7 +1,7 @@
 [gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://scripts/turn_panel.gd" id="1_panel"]
-[ext_resource type="PackedScene" path="res://scenes/rune_pad.tscn" id="2_pad"]
+[ext_resource type="PackedScene" path="res://scenes/direction_pad.tscn" id="2_pad"]
 
 [node name="TurnPanel" type="VBoxContainer"]
 theme_override_constants/separation = 6
@@ -18,7 +18,7 @@ horizontal_alignment = 1
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="RunePad" parent="Body" instance=ExtResource("2_pad")]
+[node name="Pad" parent="Body" instance=ExtResource("2_pad")]
 unique_name_in_owner = true
 layout_mode = 2
 
