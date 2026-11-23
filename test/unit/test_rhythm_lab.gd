@@ -40,7 +40,7 @@ func test_starts_solo_with_rune_buttons_and_a_shield() -> void:
 func test_direction_moves_the_hero_at_the_dum() -> void:
 	lab.press_dir(0, Rune.Dir.UP, _period() * 3)
 	lab._on_beat_closed(3)
-	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 0))
+	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 1))
 
 
 func test_chord_casts_the_rune() -> void:
@@ -49,7 +49,7 @@ func test_chord_casts_the_rune() -> void:
 	lab.press_dir(0, Rune.Dir.RIGHT, t + 0.05)
 	lab._on_beat_closed(3)
 	assert_eq(lab.rules.heroes[0].charge, 1)
-	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 1))
+	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 2))
 
 
 func test_rune_button_action_casts_directly() -> void:
@@ -79,8 +79,8 @@ func test_two_players_on_one_keyboard() -> void:
 	lab.press_dir(0, Rune.Dir.UP, _period() * 3)
 	lab.press_dir(1, Rune.Dir.DOWN, _period() * 3)
 	lab._on_beat_closed(3)
-	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 0))
-	assert_eq(lab.rules.heroes[1].cell, Vector2i(1, 2))
+	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 1))
+	assert_eq(lab.rules.heroes[1].cell, Vector2i(1, 4))
 
 
 func test_shield_toggle_rebuilds_the_yard() -> void:
@@ -138,3 +138,15 @@ func test_arrow_is_drawn_where_it_stops() -> void:
 	lab.rules.end_turn(2)
 	lab.rules.end_turn(4)
 	assert_eq(lab.get_node("%Arena").shot_count(), 1)
+
+
+func test_yard_option_switches_to_the_boss() -> void:
+	lab.get_node("%Yard").item_selected.emit(SparringRules.Yard.BOSS)
+	assert_eq(lab.rules.yard, SparringRules.Yard.BOSS)
+	assert_true(lab.rules.dummies[0].is_boss())
+	assert_eq(lab.get_node("%Arena").rules, lab.rules)
+	# Draw the boss with a telegraphed attack up, to catch drawing errors.
+	lab.rules.dummies[0].part_at(Vector2i(7, 3)).broken = true
+	lab.rules.end_turn(0)
+	await wait_process_frames(3)
+	assert_eq(lab.rules.dummies[0].strike_name, "Club Sweep")

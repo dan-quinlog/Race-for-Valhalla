@@ -1,9 +1,10 @@
 class_name SparringView
 extends Control
 ## Draws the Rhythm Lab's training yard (SparringRules): the zone grid with
-## borders pulsing on every heartbeat, the dummies (Post, Draugr, Varg,
-## Archer) with their states, the Archer's telegraphed arrow with a
-## countdown, and the heroes with a facing arrow, shield, Heavy
+## borders pulsing on every heartbeat, the foes (Post, Draugr, Varg,
+## Shield-thrall, Archer, or the Jötunn with its parts) with their states,
+## telegraphed attacks with their name and a countdown (purple for area
+## hits that can't be blocked), and the heroes with a facing arrow, shield, Heavy
 ## charge glow and blessing ring. Attacks flash the zones they hit, with
 ## BLOCK / EVADE pops. Placeholder shapes until real sprites.
 
@@ -19,6 +20,12 @@ const HERO_COLORS: Array[Color] = [Color(0.45, 0.7, 1.0), Color(1.0, 0.65, 0.3)]
 const DUMMY_COLOR := Color(0.6, 0.5, 0.38)
 const DRAUGR_COLOR := Color(0.45, 0.55, 0.45)
 const VARG_COLOR := Color(0.62, 0.6, 0.58)
+const THRALL_COLOR := Color(0.6, 0.45, 0.32)
+const BOSS_COLOR := Color(0.35, 0.5, 0.62)
+const PART_COLOR := Color(0.55, 0.72, 0.85)
+const WOUND_COLOR := Color(0.85, 0.2, 0.25)
+const AREA_FILL := Color(0.75, 0.4, 1.0, 0.18)
+const AREA_HOT := Color(0.75, 0.4, 1.0, 0.45)
 const TELL_FILL := Color(1.0, 0.45, 0.1, 0.18)
 const TELL_HOT := Color(1.0, 0.35, 0.1, 0.45)
 const CHARGE_COLOR := Color(1.0, 0.3, 0.2)
@@ -86,7 +93,8 @@ func _process(delta: float) -> void:
 
 
 func zone_size() -> Vector2:
-	return Vector2(size.x / SparringRules.COLS, size.y / SparringRules.LANES)
+	var grid := Vector2(SparringRules.YARD_SIZE) if rules == null else Vector2(rules.cols, rules.lanes)
+	return size / grid
 
 
 func cell_rect(cell: Vector2i) -> Rect2:
@@ -101,8 +109,8 @@ func _draw() -> void:
 	var text_size: int = clampi(int(zone_size().y * 0.14), 10, 16)
 	# The beat that resolves next: the open one.
 	var open_beat: int = beat_index
-	for col: int in SparringRules.COLS:
-		for lane: int in SparringRules.LANES:
+	for col: int in rules.cols:
+		for lane: int in rules.lanes:
 			_draw_zone(Vector2i(col, lane))
 	for d: SparringRules.Dummy in rules.dummies:
 		if d.is_alive() and d.strike_beat != SparringRules.NONE:
@@ -150,14 +158,24 @@ func _draw_zone(cell: Vector2i) -> void:
 
 func _draw_tell(d: SparringRules.Dummy, open_beat: int, font: Font, text_size: int) -> void:
 	var left: int = d.strike_beat - open_beat
+	var area: bool = d.strike_kind == SparringRules.HitKind.AREA
+	var hot: Color = AREA_HOT if area else TELL_HOT
+	var fill: Color = AREA_FILL if area else TELL_FILL
 	for cell: Vector2i in d.targets:
 		var r: Rect2 = cell_rect(cell)
-		draw_rect(r, TELL_HOT if left <= 0 else TELL_FILL)
+		draw_rect(r, hot if left <= 0 else fill)
 		if left > 0:
-			draw_string(font, r.position + Vector2(6, text_size + 4), str(left), HORIZONTAL_ALIGNMENT_LEFT, -1, text_size + 6, TELL_HOT * Color(1, 1, 1, 2))
+			draw_string(font, r.position + Vector2(6, text_size + 4), str(left), HORIZONTAL_ALIGNMENT_LEFT, -1, text_size + 6, hot * Color(1, 1, 1, 2))
+	if d.kind != SparringRules.Dummy.Kind.ARCHER and not d.targets.is_empty():
+		var r0: Rect2 = cell_rect(d.targets[0])
+		var label: String = d.strike_name + (" (AREA: evade only)" if area else "")
+		draw_string(font, Vector2(r0.position.x + 6, r0.end.y - 6), label, HORIZONTAL_ALIGNMENT_LEFT, -1, text_size, hot * Color(1, 1, 1, 2))
 
 
 func _draw_dummy(d: SparringRules.Dummy, open_beat: int, font: Font, text_size: int) -> void:
+	if d.is_boss():
+		_draw_boss(d, open_beat, font, text_size)
+		return
 	var r: Rect2 = cell_rect(d.cell)
 	var c: Vector2 = r.get_center() + Vector2(0, r.size.y * 0.05)
 	var s: float = minf(r.size.x, r.size.y) * 0.24
@@ -173,6 +191,14 @@ func _draw_dummy(d: SparringRules.Dummy, open_beat: int, font: Font, text_size: 
 			var h: float = s * (0.45 if d.is_leaping(open_beat) else 0.8)
 			var fx: float = signf(d.leap_dir.x) if d.is_leaping(open_beat) and d.leap_dir.x != 0 else -1.0
 			draw_colored_polygon(PackedVector2Array([c + Vector2(fx * s * 1.3, 0), c + Vector2(-fx * s, -h), c + Vector2(-fx * s, h)]), VARG_COLOR)
+		SparringRules.Dummy.Kind.THRALL:
+			draw_circle(c, s * 0.9, THRALL_COLOR)
+			if d.is_shielded(open_beat):
+				var at := c + Vector2(d.facing * s * 1.2, 0)
+				draw_line(at + Vector2(0, -s * 1.1), at + Vector2(0, s * 1.1), SHIELD_COLOR, 6.0)
+			else:
+				var tip := c + Vector2(d.facing * s * 1.6, 0)
+				draw_line(c, tip, TEXT_COLOR, 2.0)
 		SparringRules.Dummy.Kind.ARCHER:
 			draw_colored_polygon(PackedVector2Array([c + Vector2(-s, 0), c + Vector2(s, -s), c + Vector2(s, s)]), ARCHER_COLOR)
 	if d.is_vulnerable(open_beat):
@@ -185,6 +211,8 @@ func _draw_dummy(d: SparringRules.Dummy, open_beat: int, font: Font, text_size: 
 		tags.append("ROOTED")
 	if d.is_vulnerable(open_beat):
 		tags.append("VULN")
+	if d.kind == SparringRules.Dummy.Kind.THRALL and not d.is_shielded(open_beat):
+		tags.append("NO SHIELD")
 	draw_string(font, Vector2(r.position.x + 4, r.end.y - 6), " ".join(tags), HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 8, text_size - 2, TEXT_COLOR)
 
 
@@ -220,3 +248,38 @@ func _draw_hero(h: SparringRules.Fighter, open_beat: int, font: Font, text_size:
 	if h.blessed:
 		tags.append("BLESSED")
 	draw_string(font, Vector2(c.x - s * 1.5, c.y + s + text_size + 2), " ".join(tags), HORIZONTAL_ALIGNMENT_LEFT, -1, text_size - 2, col)
+
+
+## The boss: one body over its footprint, each part boxed in its zone with
+## how worn it is (a red cross once broken), vulnerable zones ringed, and
+## one wide health bar.
+func _draw_boss(d: SparringRules.Dummy, open_beat: int, font: Font, text_size: int) -> void:
+	var body := cell_rect(d.footprint[0])
+	for z: Vector2i in d.footprint:
+		body = body.merge(cell_rect(z))
+	draw_rect(body.grow(-6.0), BOSS_COLOR * Color(1, 1, 1, 0.85))
+	for z: Vector2i in d.footprint:
+		var r: Rect2 = cell_rect(z).grow(-12.0)
+		var p: SparringRules.Part = d.part_at(z)
+		if p != null:
+			if p.broken:
+				draw_rect(r, WOUND_COLOR * Color(1, 1, 1, 0.5))
+				draw_line(r.position, r.end, WOUND_COLOR, 3.0)
+				draw_line(Vector2(r.end.x, r.position.y), Vector2(r.position.x, r.end.y), WOUND_COLOR, 3.0)
+			else:
+				draw_rect(r, PART_COLOR, false, 3.0)
+				var worn := Rect2(r.position.x, r.end.y - 6.0, r.size.x, 5.0)
+				draw_rect(worn, HP_BACK)
+				draw_rect(Rect2(worn.position, Vector2(worn.size.x * (1.0 - p.wear / float(p.break_hp)), worn.size.y)), PART_COLOR)
+			draw_string(font, r.position + Vector2(4, text_size + 2), p.display_name, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 8, text_size - 2, TEXT_COLOR)
+		else:
+			draw_string(font, r.position + Vector2(4, text_size + 2), "body", HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 8, text_size - 2, TEXT_COLOR * Color(1, 1, 1, 0.6))
+		if d.vulnerable_at(z, open_beat):
+			draw_arc(r.get_center(), minf(r.size.x, r.size.y) * 0.45, 0.0, TAU, 24, VULN_COLOR, 3.0)
+	var bar := Rect2(body.position.x + 6.0, body.position.y + 2.0, body.size.x - 12.0, 6.0)
+	draw_rect(bar, HP_BACK)
+	draw_rect(Rect2(bar.position, Vector2(bar.size.x * d.hp / float(d.max_hp), bar.size.y)), HP_FRONT)
+	var tag: String = "%s %d/%d" % [d.display_name, d.hp, d.max_hp]
+	if d.broken_parts() > 0:
+		tag += "  BLEEDING x%d" % d.broken_parts()
+	draw_string(font, Vector2(body.position.x + 6.0, body.end.y - 8.0), tag, HORIZONTAL_ALIGNMENT_LEFT, body.size.x - 12.0, text_size, TEXT_COLOR)

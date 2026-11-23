@@ -38,10 +38,10 @@ func _beside_post() -> SparringRules.Dummy:
 
 func test_moving_left_right_turns_and_up_down_keeps_facing() -> void:
 	_go(Rune.Dir.LEFT, 1)
-	assert_eq(hero.cell, Vector2i(0, 1))
+	assert_eq(hero.cell, Vector2i(0, 2))
 	assert_eq(hero.facing, SparringRules.LEFT)
 	_go(Rune.Dir.UP, 2)
-	assert_eq(hero.cell, Vector2i(0, 0))
+	assert_eq(hero.cell, Vector2i(0, 1))
 	assert_eq(hero.facing, SparringRules.LEFT)
 
 
@@ -241,7 +241,7 @@ func test_arrow_stops_at_the_first_hero() -> void:
 	rules.end_turn(4)
 	assert_lt(hero.hp, SparringRules.HERO_HP)
 	assert_eq(behind.hp, SparringRules.HERO_HP)
-	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(7, 1), Vector2i(5, 1), "HIT"])
+	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(9, 1), Vector2i(5, 1), "HIT"])
 
 
 func test_blocking_covers_the_hero_behind() -> void:
@@ -251,7 +251,7 @@ func test_blocking_covers_the_hero_behind() -> void:
 	rules.end_turn(4)
 	assert_eq(hero.hp, SparringRules.HERO_HP)
 	assert_eq(behind.hp, SparringRules.HERO_HP)
-	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(7, 1), Vector2i(5, 1), "BLOCK"])
+	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(9, 1), Vector2i(5, 1), "BLOCK"])
 
 
 func test_evading_lets_the_arrow_fly_on_to_the_next() -> void:
@@ -264,7 +264,7 @@ func test_evading_lets_the_arrow_fly_on_to_the_next() -> void:
 	rules.end_turn(4)
 	assert_eq(hero.hp, SparringRules.HERO_HP)
 	assert_lt(behind.hp, SparringRules.HERO_HP)
-	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(7, 1), Vector2i(4, 1), "HIT"])
+	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(9, 1), Vector2i(4, 1), "HIT"])
 
 
 func test_blocker_sharing_a_zone_covers_their_partner() -> void:
@@ -282,7 +282,7 @@ func test_empty_lane_arrow_flies_off_the_yard() -> void:
 	rules.end_turn(2)
 	watch_signals(rules)
 	rules.end_turn(4)
-	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(7, 1), Vector2i(-1, 1), "MISS"])
+	assert_signal_emitted_with_parameters(rules, "shot", [Vector2i(9, 1), Vector2i(-1, 1), "MISS"])
 
 
 ## Only the Draugr, at (5, 0) on its loop from beat 0: attack/move on beats
@@ -290,7 +290,9 @@ func test_empty_lane_arrow_flies_off_the_yard() -> void:
 func _draugr_at(hero_cell: Vector2i) -> SparringRules.Dummy:
 	_keep([SparringRules.Dummy.Kind.DRAUGR])
 	hero.cell = hero_cell
-	return _dummy(SparringRules.Dummy.Kind.DRAUGR)
+	var draugr: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.DRAUGR)
+	draugr.cell = Vector2i(5, 0)
+	return draugr
 
 
 func test_draugr_attacks_a_hero_beside_it() -> void:
@@ -355,6 +357,7 @@ func _varg_lined_up(kinds: Array = [SparringRules.Dummy.Kind.VARG]) -> SparringR
 func test_varg_comes_in_line_before_closing() -> void:
 	_keep([SparringRules.Dummy.Kind.VARG])
 	var varg: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.VARG)
+	varg.cell = Vector2i(6, 2)
 	hero.cell = Vector2i(1, 1)
 	rules.end_turn(0)
 	assert_eq(varg.cell, Vector2i(6, 1), "into the hero's lane first")
@@ -442,3 +445,193 @@ func test_a_body_in_the_way_cuts_the_leap_short() -> void:
 	rules.end_turn(1)
 	assert_eq(varg.cell, Vector2i(6, 1))
 	assert_eq(hero.hp, SparringRules.HERO_HP)
+
+
+## Only the Shield-thrall at (5, 1), facing left. Its attack/move steps
+## are the odd beats.
+func _thrall_at(hero_cell: Vector2i) -> SparringRules.Dummy:
+	_keep([SparringRules.Dummy.Kind.THRALL])
+	hero.cell = hero_cell
+	var thrall: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.THRALL)
+	thrall.cell = Vector2i(5, 1)
+	return thrall
+
+
+func test_thrall_thrusts_two_zones_ahead() -> void:
+	_thrall_at(Vector2i(3, 1))
+	rules.end_turn(0)
+	assert_eq(hero.hp, SparringRules.HERO_HP, "stands on even beats")
+	rules.end_turn(1)
+	assert_eq(hero.hp, SparringRules.HERO_HP - SparringRules.THRUST_DAMAGE)
+
+
+func test_thrall_turns_and_steps_into_the_heros_lane() -> void:
+	var thrall: SparringRules.Dummy = _thrall_at(Vector2i(7, 3))
+	rules.end_turn(1)
+	assert_eq(thrall.facing, SparringRules.RIGHT)
+	assert_eq(thrall.cell, Vector2i(5, 2))
+
+
+func test_thrall_shield_halves_hits_from_the_front() -> void:
+	var thrall: SparringRules.Dummy = _thrall_at(Vector2i(4, 1))
+	_go(Rune.Dir.RIGHT, 0)
+	assert_eq(thrall.hp, SparringRules.THRALL_HP - roundi(SparringRules.BASIC_DAMAGE * SparringRules.SHIELD_MULTIPLIER))
+
+
+func test_flanking_the_thrall_lands_in_full() -> void:
+	var thrall: SparringRules.Dummy = _thrall_at(Vector2i(5, 0))
+	_go(Rune.Dir.DOWN, 0)
+	assert_eq(thrall.hp, SparringRules.THRALL_HP - SparringRules.BASIC_DAMAGE)
+	hero.cell = Vector2i(6, 1)
+	_go(Rune.Dir.LEFT, 2)
+	assert_eq(thrall.hp, SparringRules.THRALL_HP - SparringRules.BASIC_DAMAGE * 2, "from behind")
+
+
+func test_charged_attack_knocks_the_shield_aside() -> void:
+	var thrall: SparringRules.Dummy = _thrall_at(Vector2i(4, 1))
+	_cast(RuneCorner.Kind.HEAVY, 0)
+	_go(Rune.Dir.RIGHT, 2)
+	assert_eq(thrall.hp, SparringRules.THRALL_HP - roundi(SparringRules.BASIC_DAMAGE * 1.5), "that blow lands in full")
+	assert_false(thrall.is_shielded(3))
+	assert_true(thrall.is_shielded(2 + SparringRules.SHIELD_DOWN_BEATS + 1))
+
+
+func test_thrust_stops_at_the_first_hero() -> void:
+	rules = SparringRules.new(2)
+	hero = rules.heroes[0]
+	var behind: SparringRules.Fighter = rules.heroes[1]
+	_thrall_at(Vector2i(4, 1))
+	behind.cell = Vector2i(3, 1)
+	rules.act(0, TurnAction.direction(Rune.Dir.RIGHT, 1))
+	rules.end_turn(1)
+	assert_eq(hero.hp, SparringRules.HERO_HP, "blocked while attacking it")
+	assert_eq(behind.hp, SparringRules.HERO_HP, "covered by the blocker")
+
+
+## The boss yard: the Jötunn covers columns 6-7, lanes 1-3. Club Arm at
+## (6, 1), Head (7, 1), Legs (7, 3). Its first attack (Club Sweep, the
+## column in front) winds up on beat 0 and lands on beat 2.
+func _boss_yard() -> SparringRules.Dummy:
+	rules = SparringRules.new(1, true, SparringRules.Yard.BOSS)
+	hero = rules.heroes[0]
+	return rules.dummies[0]
+
+
+func test_boss_yard_is_bigger_and_holds_the_jotunn() -> void:
+	var boss: SparringRules.Dummy = _boss_yard()
+	assert_eq(Vector2i(rules.cols, rules.lanes), SparringRules.YARD_SIZE)
+	assert_eq(boss.footprint.size(), 6)
+	assert_eq(rules.dummy_at(Vector2i(7, 3)), boss)
+
+
+func test_bumping_a_part_wears_it_and_the_body_takes_more() -> void:
+	var boss: SparringRules.Dummy = _boss_yard()
+	hero.cell = Vector2i(5, 1)
+	_go(Rune.Dir.RIGHT, 0)
+	assert_eq(boss.part_at(Vector2i(6, 1)).wear, SparringRules.BASIC_DAMAGE)
+	assert_eq(boss.hp, SparringRules.BOSS_HP - SparringRules.BASIC_DAMAGE)
+	hero.cell = Vector2i(5, 2)
+	_go(Rune.Dir.RIGHT, 1)
+	assert_eq(boss.hp, SparringRules.BOSS_HP - SparringRules.BASIC_DAMAGE - roundi(SparringRules.BASIC_DAMAGE * SparringRules.BONUS), "bare body +50%")
+
+
+func test_breaking_a_part_gives_glory_and_bleeds() -> void:
+	var boss: SparringRules.Dummy = _boss_yard()
+	hero.cell = Vector2i(7, 0)
+	boss.part_at(Vector2i(7, 1)).wear = SparringRules.PART_HP - 1
+	_go(Rune.Dir.DOWN, 1)
+	assert_true(boss.part_at(Vector2i(7, 1)).broken)
+	assert_eq(hero.glory, SparringRules.PART_GLORY)
+	var hp: int = boss.hp
+	rules.end_turn(1)
+	assert_eq(boss.hp, hp - SparringRules.BLEED_PER_WOUND)
+
+
+func test_flourish_hits_each_boss_zone_it_touches() -> void:
+	var boss: SparringRules.Dummy = _boss_yard()
+	# An L-shaped body, so one zone touches two of its zones.
+	boss.footprint.append(Vector2i(5, 1))
+	hero.cell = Vector2i(5, 2)
+	_cast(RuneCorner.Kind.FLOURISH, 0)
+	var bare: int = roundi(SparringRules.FLOURISH_DAMAGE * SparringRules.BONUS)
+	assert_eq(boss.hp, SparringRules.BOSS_HP - bare * 2, "(5, 1) and (6, 2), both bare body")
+
+
+func test_trip_makes_just_that_zone_vulnerable() -> void:
+	var boss: SparringRules.Dummy = _boss_yard()
+	hero.cell = Vector2i(5, 1)
+	_cast(RuneCorner.Kind.TRIP, 0)
+	assert_true(boss.vulnerable_at(Vector2i(6, 1), 1))
+	assert_false(boss.vulnerable_at(Vector2i(6, 2), 1))
+	assert_false(boss.is_rooted(1))
+
+
+func test_melee_sweep_is_telegraphed_and_blockable() -> void:
+	_boss_yard()
+	hero.cell = Vector2i(5, 2)
+	rules.end_turn(0)
+	assert_eq(rules.dummies[0].strike_kind, SparringRules.HitKind.MELEE)
+	assert_has(rules.dummies[0].targets, Vector2i(5, 2))
+	rules.end_turn(1)
+	_go(Rune.Dir.RIGHT, 2)
+	rules.end_turn(2)
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+
+
+func test_beam_hits_everyone_in_line_unless_each_blocks() -> void:
+	rules = SparringRules.new(2, true, SparringRules.Yard.BOSS)
+	hero = rules.heroes[0]
+	var other: SparringRules.Fighter = rules.heroes[1]
+	var boss: SparringRules.Dummy = rules.dummies[0]
+	boss.slot = 1
+	hero.cell = Vector2i(4, 1)
+	other.cell = Vector2i(2, 1)
+	rules.end_turn(0)
+	assert_eq(boss.strike_kind, SparringRules.HitKind.BEAM)
+	rules.end_turn(1)
+	rules.act(0, TurnAction.direction(Rune.Dir.RIGHT, 2))
+	assert_eq(hero.cell, Vector2i(4, 1), "stood firm into the breath")
+	rules.end_turn(2)
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+	assert_lt(other.hp, SparringRules.HERO_HP, "the beam goes past a blocker")
+
+
+func test_area_can_not_be_blocked_only_evaded() -> void:
+	var boss: SparringRules.Dummy = _boss_yard()
+	boss.slot = 2
+	hero.cell = Vector2i(5, 2)
+	rules.end_turn(0)
+	assert_eq(boss.strike_kind, SparringRules.HitKind.AREA)
+	rules.end_turn(1)
+	_go(Rune.Dir.RIGHT, 2)
+	rules.end_turn(2)
+	assert_lt(hero.hp, SparringRules.HERO_HP, "a shield doesn't stop a stomp")
+	hero.hp = SparringRules.HERO_HP
+	rules.end_turn(4)
+	rules.end_turn(5)
+	boss.slot = 2
+	boss.strike_beat = 6
+	boss.strike_kind = SparringRules.HitKind.AREA
+	boss.targets.assign([Vector2i(4, 2), Vector2i(5, 2)])
+	_cast(RuneCorner.Kind.PRAYER, 5)
+	_go(Rune.Dir.LEFT, 6)
+	rules.end_turn(6)
+	assert_eq(hero.hp, SparringRules.HERO_HP, "evaded")
+
+
+func test_broken_part_turns_its_attack_enraged() -> void:
+	var boss: SparringRules.Dummy = _boss_yard()
+	boss.part_at(Vector2i(6, 1)).broken = true
+	hero.cell = Vector2i(0, 4)
+	rules.end_turn(0)
+	assert_eq(boss.strike_name, "Wild Flail")
+
+
+func test_bleeding_out_earns_no_glory() -> void:
+	var boss: SparringRules.Dummy = _boss_yard()
+	boss.part_at(Vector2i(6, 1)).broken = true
+	boss.hp = 1
+	hero.cell = Vector2i(0, 4)
+	rules.end_turn(0)
+	assert_false(boss.is_alive())
+	assert_eq(hero.glory, 0)

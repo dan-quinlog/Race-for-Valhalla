@@ -144,6 +144,17 @@ popup/item_0/id = 0
 popup/item_1/text = "Rune buttons (QEZC / face)"
 popup/item_1/id = 1
 
+[node name="Yard" type="OptionButton" parent="Margin/Layout/Settings"]
+unique_name_in_owner = true
+layout_mode = 2
+focus_mode = 0
+selected = 0
+item_count = 2
+popup/item_0/text = "Sparring yard"
+popup/item_0/id = 0
+popup/item_1/text = "Jötunn"
+popup/item_1/id = 1
+
 [node name="Shield" type="CheckButton" parent="Margin/Layout/Settings"]
 unique_name_in_owner = true
 layout_mode = 2

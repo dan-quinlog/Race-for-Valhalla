@@ -30,6 +30,7 @@ const HELP: String = "One input per beat, resolved at the dum. A direction moves
 var two_players: bool = false
 var binding: Binding = Binding.RUNE_BUTTONS
 var shields: bool = true
+var yard: SparringRules.Yard = SparringRules.Yard.SPARRING
 var rules: SparringRules
 var log_lines: Array[String] = []
 
@@ -44,6 +45,7 @@ var log_lines: Array[String] = []
 @onready var _latency_ms: SpinBox = %LatencyMs
 @onready var _binding: OptionButton = %Binding
 @onready var _shield_toggle: CheckButton = %Shield
+@onready var _yard: OptionButton = %Yard
 @onready var _two_players_toggle: CheckButton = %TwoPlayers
 @onready var panels: Array[TurnPanel] = [%Player1, %Player2]
 
@@ -59,6 +61,7 @@ func _ready() -> void:
 		box.value_changed.connect(_on_setting_changed)
 	_binding.item_selected.connect(_on_binding_selected)
 	_shield_toggle.toggled.connect(set_shields)
+	_yard.item_selected.connect(_on_yard_selected)
 	%RestartButton.pressed.connect(restart)
 	%StageButton.pressed.connect(open_stage)
 	_two_players_toggle.toggled.connect(set_two_players)
@@ -79,7 +82,7 @@ func restart() -> void:
 	for p: TurnPanel in panels:
 		p.configure(_clock.period, window, perfect)
 	_ekg.configure(_clock.period, window, window, perfect)
-	rules = SparringRules.new(2 if two_players else 1, shields)
+	rules = SparringRules.new(2 if two_players else 1, shields, yard)
 	rules.logged.connect(_on_logged)
 	_arena.rules = rules
 	_arena.beat_index = -1
@@ -111,6 +114,18 @@ func set_shields(on: bool) -> void:
 	if _shield_toggle.button_pressed != on:
 		_shield_toggle.set_pressed_no_signal(on)
 	restart()
+
+
+## Which training yard to fight in: the sparring foes, or the boss.
+func set_yard(y: SparringRules.Yard) -> void:
+	yard = y
+	if _yard.selected != y:
+		_yard.select(y)
+	restart()
+
+
+func _on_yard_selected(index: int) -> void:
+	set_yard(index as SparringRules.Yard)
 
 
 func _refresh_hints() -> void:
