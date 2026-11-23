@@ -399,11 +399,29 @@ func test_evading_lets_the_varg_pass() -> void:
 	assert_eq(hero.hp, SparringRules.HERO_HP)
 
 
-func test_sidestepping_the_leap_still_gets_bitten() -> void:
+func test_sidestepping_the_leap_dodges_it() -> void:
 	var varg: SparringRules.Dummy = _varg_lined_up()
 	_go(Rune.Dir.UP, 1)
 	rules.end_turn(1)
+	assert_eq(varg.cell, Vector2i(3, 1), "lands where the hero stood")
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+
+
+func test_backing_out_of_reach_dodges_the_leap() -> void:
+	var varg: SparringRules.Dummy = _varg_lined_up()
+	_go(Rune.Dir.LEFT, 1)
+	rules.end_turn(1)
 	assert_eq(varg.cell, Vector2i(3, 1))
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+
+
+func test_backing_away_within_reach_still_gets_bitten() -> void:
+	var varg: SparringRules.Dummy = _varg_lined_up()
+	hero.cell = Vector2i(4, 1)
+	varg.leap_aim = Vector2i(4, 1)
+	_go(Rune.Dir.LEFT, 1)
+	rules.end_turn(1)
+	assert_eq(varg.cell, Vector2i(4, 1))
 	assert_eq(hero.hp, SparringRules.HERO_HP - SparringRules.VARG_DAMAGE)
 
 

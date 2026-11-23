@@ -352,8 +352,13 @@ func _threatens(dummy: Dummy, h: Fighter) -> bool:
 
 ## The Rune.Dir from `h` toward `dummy`: the way a shield must face.
 static func _from_dir(dummy: Dummy, h: Fighter) -> int:
-	var dx: int = dummy.cell.x - h.cell.x
-	var dy: int = dummy.cell.y - h.cell.y
+	return _dir_toward(h.cell, dummy.cell)
+
+
+## The Rune.Dir pointing from `a` toward `b` (the longer axis wins).
+static func _dir_toward(a: Vector2i, b: Vector2i) -> int:
+	var dx: int = b.x - a.x
+	var dy: int = b.y - a.y
 	if absi(dx) >= absi(dy):
 		return Rune.Dir.RIGHT if dx > 0 else Rune.Dir.LEFT
 	return Rune.Dir.DOWN if dy > 0 else Rune.Dir.UP
@@ -476,50 +481,60 @@ func _plan_leap(d: Dummy, n: int) -> void:
 	d.leap_dir = Vector2i(signi(aim.x - d.cell.x), signi(aim.y - d.cell.y))
 
 
-## The leap: along its line, up to LEAP_RANGE zones, landing next to where
-## the target hero ended up and biting. Anything in the way stops it (a
-## hero in the way gets bitten instead). An evading target is passed: the
-## Varg lands in the zone they left.
+## The leap: along its line, up to LEAP_RANGE zones. It bites the first
+## hero standing in a zone it could have landed on, stopping just short of
+## them; a hero who stepped out of the line or out of reach dodges it. An
+## evading hero is passed. Anything else in the way cuts it short. With no
+## one to bite, it lands in the zone its target stood in (or as near as it
+## got).
 func _leap(d: Dummy, n: int) -> void:
 	d.leap_beat = NONE
 	d.rest_until = n + 1
-	var h: Fighter = heroes[d.leap_target]
 	var from: Vector2i = d.cell
-	var at: Vector2i = from
+	var aim_k: int = _manhattan(d.leap_aim, from)
+	var before: Vector2i = from
+	var landing: Vector2i = from
 	var victim: Fighter = null
+	for k: int in range(1, LEAP_RANGE + 1):
+		var c: Vector2i = from + d.leap_dir * k
+		if not in_bounds(c) or dummy_at(c) != null:
+			break
+		var standing: Array[Fighter] = []
+		for h: Fighter in heroes:
+			if h.cell == c and h.evade_beat != n:
+				standing.append(h)
+		if not standing.is_empty():
+			# A blocker covers a zone-mate.
+			victim = standing[0]
+			for h: Fighter in standing:
+				if _guards_from(h, before, n):
+					victim = h
+			break
+		if hero_at(c):
+			for h: Fighter in heroes:
+				if h.cell == c:
+					_hit_hero(h, d, n, VARG_DAMAGE)
+			continue
+		before = c
+		if k <= aim_k:
+			landing = c
+	if victim != null:
+		landing = before
 	var path: Array[Vector2i] = []
-	if h.evade_beat == n:
-		_hit_hero(h, d, n, VARG_DAMAGE)
-		# Pass the hero and land in the zone they left (where it aimed).
-		for k: int in range(1, _manhattan(d.leap_aim, from) + 1):
-			var c: Vector2i = from + d.leap_dir * k
-			if c == h.cell:
-				path.append(c)
-				continue
-			if not is_free(c):
-				victim = first_hero_at(c)
-				break
-			at = c
-			path.append(c)
-	else:
-		for k: int in range(0, LEAP_RANGE + 1):
-			var c: Vector2i = from + d.leap_dir * k
-			if k > 0:
-				if not is_free(c):
-					victim = first_hero_at(c)
-					break
-				at = c
-				path.append(c)
-			if _manhattan(at, h.cell) == 1:
-				victim = h
-				break
-	d.cell = at
+	for k: int in range(1, _manhattan(landing, from) + 1):
+		path.append(from + d.leap_dir * k)
+	d.cell = landing
 	if not path.is_empty():
 		flashed.emit(path, LEAP_COLOR, "")
 	if victim != null:
 		_hit_hero(victim, d, n, VARG_DAMAGE)
-	elif h.evade_beat != n:
+	else:
 		_log("The Varg leaps and snaps at nothing")
+
+
+## True if `h` guards against a hit coming from `source` on beat `n`.
+func _guards_from(h: Fighter, source: Vector2i, n: int) -> bool:
+	return h.guard_beat == n and h.guard_dir == _dir_toward(h.cell, source)
 
 
 func _strike_cycle(d: Dummy, n: int) -> void:
