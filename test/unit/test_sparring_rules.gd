@@ -881,3 +881,13 @@ func test_pinned_short_of_the_edge_is_crushed_and_stunned() -> void:
 	assert_eq(hero.hp, SparringRules.HERO_HP - SparringRules.CRUSH_DAMAGE)
 	_go(Rune.Dir.RIGHT, 2)
 	assert_eq(hero.cell, Vector2i(0, 5), "stunned for the next beat")
+
+
+func test_the_cave_jotunns_legs_cover_both_ground_lanes() -> void:
+	var boss: SparringRules.Dummy = _cave()
+	var legs: SparringRules.Part = boss.part_at(Vector2i(7, 5))
+	assert_eq(legs.display_name, "Legs")
+	assert_eq(boss.part_at(Vector2i(7, 4)), legs)
+	hero.cell = Vector2i(6, 4)
+	_go(Rune.Dir.RIGHT, 0)
+	assert_eq(legs.wear, SparringRules.BASIC_DAMAGE)

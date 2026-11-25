@@ -242,6 +242,8 @@ class BossMove:
 class Part:
 	var display_name: String
 	var cell: Vector2i
+	## Every zone the part covers (its `cell` and any more).
+	var cells: Array[Vector2i] = []
 	var break_hp: int
 	var wear: int = 0
 	var broken: bool = false
@@ -254,6 +256,7 @@ class Part:
 	func _init(p_name: String, p_cell: Vector2i, p_attack: BossMove, p_enraged: BossMove) -> void:
 		display_name = p_name
 		cell = p_cell
+		cells = [p_cell]
 		break_hp = PART_HP
 		attack = p_attack
 		enraged = p_enraged
@@ -322,7 +325,7 @@ class Dummy extends Combatant:
 
 	func part_at(c: Vector2i) -> Part:
 		for p: Part in parts:
-			if p.cell == c:
+			if c in p.cells:
 				return p
 		return null
 
@@ -511,7 +514,7 @@ func _find_depth_rows() -> void:
 
 
 ## The cave's Jötunn: 3 columns by all 6 lanes on the right. Head at the
-## catwalk, Chest beside the low vines, Legs on the front ground lane. Each
+## catwalk, Chest beside the low vines, Legs on both ground lanes. Each
 ## part alternates a knockback attack with another:
 ## - Legs: Kick (6 zones in front of the feet, lanes 1-3; up 1, left 2) /
 ##   Stomp (area on the ground near it), enraged Quake.
@@ -531,6 +534,7 @@ func cave_jotunn() -> Dummy:
 	var legs := Part.new("Legs", Vector2i(front, 5),
 			BossMove.new("Kick", HitKind.MELEE, _block(near, [3, 4, 5]), 12, up_left, Rune.Dir.RIGHT),
 			BossMove.new("Raging Kick", HitKind.MELEE, _block(near, [3, 4, 5]), 16, up_left, Rune.Dir.RIGHT))
+	legs.cells.append(Vector2i(front, 4))
 	legs.alt = BossMove.new("Stomp", HitKind.AREA, _block([front - 3, front - 2, front - 1], [4, 5]), 12)
 	legs.alt_enraged = BossMove.new("Quake", HitKind.AREA, _block(range(0, front), [4, 5]), 12)
 	var head := Part.new("Head", Vector2i(front, 1),
