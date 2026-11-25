@@ -46,6 +46,7 @@ var log_lines: Array[String] = []
 @onready var _binding: OptionButton = %Binding
 @onready var _shield_toggle: CheckButton = %Shield
 @onready var _yard: OptionButton = %Yard
+@onready var _wide_toggle: CheckButton = %WideView
 @onready var _two_players_toggle: CheckButton = %TwoPlayers
 @onready var panels: Array[TurnPanel] = [%Player1, %Player2]
 
@@ -62,6 +63,7 @@ func _ready() -> void:
 	_binding.item_selected.connect(_on_binding_selected)
 	_shield_toggle.toggled.connect(set_shields)
 	_yard.item_selected.connect(_on_yard_selected)
+	_wide_toggle.toggled.connect(set_wide_view)
 	%RestartButton.pressed.connect(restart)
 	%StageButton.pressed.connect(open_stage)
 	_two_players_toggle.toggled.connect(set_two_players)
@@ -122,6 +124,14 @@ func set_yard(y: SparringRules.Yard) -> void:
 	if _yard.selected != y:
 		_yard.select(y)
 	restart()
+
+
+## Side-view yards: always show the whole yard (players feel small) instead
+## of the camera following the heroes and zooming out as they spread.
+func set_wide_view(on: bool) -> void:
+	_arena.always_wide = on
+	if _wide_toggle.button_pressed != on:
+		_wide_toggle.set_pressed_no_signal(on)
 
 
 func _on_yard_selected(index: int) -> void:

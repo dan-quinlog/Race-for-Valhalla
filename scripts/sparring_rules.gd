@@ -64,6 +64,23 @@ extends RefCounted
 ##   parts' telegraphed attacks: Club Sweep (melee) / Frost Breath (beam) /
 ##   Stomp (area), enraged to Wild Flail / Jötunn's Roar / Quake. A Trip on
 ##   a zone makes that zone vulnerable (bosses can't be rooted).
+##
+## The cave yard (Yard.CAVE) is seen from the side: lanes are height, with
+## a terrain tag per zone (Zone). Rows that share a plane (the ground's two
+## lanes) are depth, walked freely. Otherwise a hero goes up only on a
+## ladder, or by climbing from a hang. Air and vines don't hold you: a hero
+## who started the beat in the air acts, then falls one zone (left/right
+## drifts). Up in vines hangs: no fall that beat or the next, and the next
+## beat's action is free; up again then climbs into the zone above if it
+## allows free entry. Down in the air is a plunge: straight down to the
+## first foe or footing, +PLUNGE_BONUS_PER_LANE per lane fallen (a depth
+## plane is searched for a foe in any of its lanes). Boss knockback attacks
+## have a footprint (the zones they hit) and a knockback: a block or evade
+## only pushes the hero to the footprint's edge, an unblocked hit knocks
+## them the full way. Paths go vertical first, then horizontal, from where
+## the hero stood. A wall, a body or a zone without forced entry stops them
+## with crush damage; a hero who can't even reach the edge is also stunned
+## for the next beat.
 
 signal logged(text: String)
 ## Zones to flash in the view, with a short label ("" for none).
@@ -72,10 +89,22 @@ signal flashed(cells: Array[Vector2i], color: Color, text: String)
 ## `outcome` is "HIT", "BLOCK" or "MISS".
 signal shot(from: Vector2i, to: Vector2i, outcome: String)
 
-enum Yard { SPARRING, BOSS }
+enum Yard { SPARRING, BOSS, CAVE }
 enum HitKind { MELEE, PROJECTILE, BEAM, AREA }
+## What a side-view zone is made of. FLOOR, LEDGE and LADDER hold a hero up;
+## AIR and VINES don't (vines can be hung from).
+enum Ground { FLOOR, AIR, VINES, LEDGE, LADDER }
 
 const YARD_SIZE := Vector2i(10, 5)
+const CAVE_SIZE := Vector2i(10, 6)
+## A depth row's height next to a height row's 1.0, for the view.
+const DEPTH_ROW_HEIGHT: float = 0.6
+const CRUSH_DAMAGE: int = 8
+const PLUNGE_BONUS_PER_LANE: float = 0.25
+const PLUNGE_MAX_LANES: int = 4
+const RUNNER_HP: int = 20
+const RUNNER_RESPAWN_BEATS: int = 8
+const NO_GUARD: int = -1
 const NONE: int = -(1 << 62)
 const LEFT: int = -1
 const RIGHT: int = 1
@@ -140,6 +169,24 @@ const AREA_COLOR := Color(0.75, 0.4, 1.0)
 const BLOCK_COLOR := Color(0.6, 0.8, 1.0)
 const EVADE_COLOR := Color(1.0, 0.85, 0.3)
 const BREAK_COLOR := Color(1.0, 0.95, 0.6)
+const KNOCK_COLOR := Color(0.95, 0.95, 0.95)
+
+
+## A side-view zone's terrain. Zones on the same `plane` are one level
+## (depth between them is walked freely). `free_entry`: a hero may move in
+## on their own. `forced_entry`: knockback may carry a hero in.
+class Zone:
+	var ground: Ground
+	var plane: int
+	var free_entry: bool = true
+	var forced_entry: bool = true
+
+	func _init(p_ground: Ground, p_plane: int) -> void:
+		ground = p_ground
+		plane = p_plane
+
+	func holds_up() -> bool:
+		return ground == Ground.FLOOR or ground == Ground.LEDGE or ground == Ground.LADDER
 
 
 class Fighter extends Combatant:
@@ -153,6 +200,12 @@ class Fighter extends Combatant:
 	var guard_dir: int = Rune.Dir.RIGHT
 	## The beat a blessed move evades on.
 	var evade_beat: int = NONE
+	## Side view: the beat the hero last grabbed vines (holds that beat and
+	## the next), the last beat they're stunned, and whether they ended the
+	## last beat in the air (so they fall after acting this one).
+	var hang_beat: int = NONE
+	var stun_until: int = NONE
+	var was_airborne: bool = false
 
 	func _init(p_player: int, p_cell: Vector2i) -> void:
 		super("P%d" % (p_player + 1), HERO_HP, p_cell)
@@ -162,22 +215,30 @@ class Fighter extends Combatant:
 		return charge > 0
 
 
-## A boss attack: the zones it hits, how, and how hard.
+## A boss attack: the zones it hits (its footprint), how, and how hard. A
+## knockback attack also carries a `knock` (columns, lanes; up is -y) and
+## the Rune.Dir a shield must face to block it (`guard`, NO_GUARD: toward
+## the boss).
 class BossMove:
 	var display_name: String
 	var kind: HitKind
 	var zones: Array[Vector2i]
 	var damage: int
+	var knock := Vector2i.ZERO
+	var guard: int = NO_GUARD
 
-	func _init(p_name: String, p_kind: HitKind, p_zones: Array[Vector2i], p_damage: int) -> void:
+	func _init(p_name: String, p_kind: HitKind, p_zones: Array[Vector2i], p_damage: int, p_knock := Vector2i.ZERO, p_guard: int = NO_GUARD) -> void:
 		display_name = p_name
 		kind = p_kind
 		zones = p_zones
 		damage = p_damage
+		knock = p_knock
+		guard = p_guard
 
 
 ## A breakable boss part in one of its zones, with the attack it drives
-## while intact and once broken.
+## while intact and once broken. A part with an `alt` attack alternates the
+## two each time its slot comes up.
 class Part:
 	var display_name: String
 	var cell: Vector2i
@@ -186,6 +247,9 @@ class Part:
 	var broken: bool = false
 	var attack: BossMove
 	var enraged: BossMove
+	var alt: BossMove = null
+	var alt_enraged: BossMove = null
+	var uses: int = 0
 
 	func _init(p_name: String, p_cell: Vector2i, p_attack: BossMove, p_enraged: BossMove) -> void:
 		display_name = p_name
@@ -194,9 +258,16 @@ class Part:
 		attack = p_attack
 		enraged = p_enraged
 
+	func next_move() -> BossMove:
+		var use_alt: bool = alt != null and uses % 2 == 1
+		uses += 1
+		if use_alt:
+			return alt_enraged if broken else alt
+		return enraged if broken else attack
+
 
 class Dummy extends Combatant:
-	enum Kind { POST, DRAUGR, VARG, THRALL, ARCHER, BOSS }
+	enum Kind { POST, DRAUGR, VARG, THRALL, ARCHER, BOSS, RUNNER }
 	var kind: Kind
 	var home: Vector2i
 	var glory_value: int = KILL_GLORY
@@ -210,6 +281,9 @@ class Dummy extends Combatant:
 	var strike_kind: HitKind = HitKind.PROJECTILE
 	var strike_name: String = ""
 	var strike_damage: int = STRIKE_DAMAGE
+	## A knockback attack's knock and guard direction (see BossMove).
+	var strike_knock := Vector2i.ZERO
+	var strike_guard: int = NO_GUARD
 	## Which beat of its loop it starts on.
 	var cycle_offset: int = 0
 	## VARG: the beat it leaps on (NONE when not leaping), at which hero,
@@ -288,6 +362,8 @@ class Dummy extends Combatant:
 		vulnerable_until = NONE
 		strike_beat = NONE
 		targets.clear()
+		strike_knock = Vector2i.ZERO
+		strike_guard = NO_GUARD
 		leap_beat = NONE
 		rest_until = NONE
 		shield_down_until = NONE
@@ -296,6 +372,7 @@ class Dummy extends Combatant:
 		for p: Part in parts:
 			p.wear = 0
 			p.broken = false
+			p.uses = 0
 
 
 var heroes: Array[Fighter] = []
@@ -307,11 +384,25 @@ var lanes: int = YARD_SIZE.y
 var shields: bool = true
 ## The last beat end_turn ran for.
 var beat: int = NONE
+## Side view: Zone per cell. Empty for the flat, top-down yards.
+var terrain: Dictionary = {}
+## Rows that are depth (they share a plane with another row).
+var depth_rows: Dictionary = {}
 
 
 func _init(player_count: int = 1, p_shields: bool = true, p_yard: Yard = Yard.SPARRING) -> void:
 	shields = p_shields
 	yard = p_yard
+	if yard == Yard.CAVE:
+		_build_cave()
+		for p: int in player_count:
+			heroes.append(Fighter.new(p, Vector2i(2 + p, 5 - p)))
+		var runner := Dummy.new("Runner", Dummy.Kind.RUNNER, Vector2i(1, 4), RUNNER_HP)
+		runner.facing = RIGHT
+		runner.home_facing = RIGHT
+		dummies.append(runner)
+		dummies.append(cave_jotunn())
+		return
 	if yard == Yard.BOSS:
 		for p: int in player_count:
 			heroes.append(Fighter.new(p, Vector2i(1, 1 + p * 2)))
@@ -388,6 +479,152 @@ func _ring(zones: Array[Vector2i], reach: int) -> Array[Vector2i]:
 	return out
 
 
+## The cave, top to bottom: vines (lane 6), the catwalk (5), vines (4),
+## open air (3), and two lanes of ground (2-1, one plane). A ladder runs up
+## the left column to the top vines.
+func _build_cave() -> void:
+	cols = CAVE_SIZE.x
+	lanes = CAVE_SIZE.y
+	for x: int in cols:
+		for y: int in lanes:
+			var g: Ground = Ground.FLOOR
+			if x == 0:
+				g = Ground.LADDER
+			else:
+				match y:
+					0, 2:
+						g = Ground.VINES
+					1:
+						g = Ground.LEDGE
+					3:
+						g = Ground.AIR
+			terrain[Vector2i(x, y)] = Zone.new(g, 0 if y >= lanes - 2 else 10 + y)
+	_find_depth_rows()
+
+
+func _find_depth_rows() -> void:
+	depth_rows.clear()
+	for y: int in lanes:
+		for y2: int in lanes:
+			if y2 != y and zone_of(Vector2i(1, y)).plane == zone_of(Vector2i(1, y2)).plane:
+				depth_rows[y] = true
+
+
+## The cave's Jötunn: 3 columns by all 6 lanes on the right. Head at the
+## catwalk, Chest beside the low vines, Legs on the front ground lane. Each
+## part alternates a knockback attack with another:
+## - Legs: Kick (6 zones in front of the feet, lanes 1-3; up 1, left 2) /
+##   Stomp (area on the ground near it), enraged Quake.
+## - Head: Headbutt (2x2 in front of the head; down 2, left 2) / Frost
+##   Breath (beam along the catwalk), enraged Jötunn's Roar.
+## - Chest: Uppercut (air, vines and catwalk in front; up 2, block facing
+##   down) / Club Sweep (the column in front), enraged Wild Flail.
+func cave_jotunn() -> Dummy:
+	var front: int = cols - 3
+	var boss := Dummy.new("Jötunn", Dummy.Kind.BOSS, Vector2i(front, 0), BOSS_HP)
+	boss.glory_value = BOSS_GLORY
+	for x: int in range(front, cols):
+		for y: int in lanes:
+			boss.footprint.append(Vector2i(x, y))
+	var near: Array[int] = [front - 2, front - 1]
+	var up_left := Vector2i(-2, -1)
+	var legs := Part.new("Legs", Vector2i(front, 5),
+			BossMove.new("Kick", HitKind.MELEE, _block(near, [3, 4, 5]), 12, up_left, Rune.Dir.RIGHT),
+			BossMove.new("Raging Kick", HitKind.MELEE, _block(near, [3, 4, 5]), 16, up_left, Rune.Dir.RIGHT))
+	legs.alt = BossMove.new("Stomp", HitKind.AREA, _block([front - 3, front - 2, front - 1], [4, 5]), 12)
+	legs.alt_enraged = BossMove.new("Quake", HitKind.AREA, _block(range(0, front), [4, 5]), 12)
+	var head := Part.new("Head", Vector2i(front, 1),
+			BossMove.new("Headbutt", HitKind.MELEE, _block(near, [0, 1]), 14, Vector2i(-2, 2), Rune.Dir.RIGHT),
+			BossMove.new("Raging Headbutt", HitKind.MELEE, _block(near, [0, 1]), 18, Vector2i(-2, 2), Rune.Dir.RIGHT))
+	head.alt = BossMove.new("Frost Breath", HitKind.BEAM, _block(range(0, front), [1]), 12)
+	head.alt_enraged = BossMove.new("Jötunn's Roar", HitKind.AREA, _ring(boss.footprint, 2), 16)
+	var chest := Part.new("Chest", Vector2i(front, 2),
+			BossMove.new("Uppercut", HitKind.MELEE, _block(near, [1, 2, 3]), 12, Vector2i(0, -2), Rune.Dir.DOWN),
+			BossMove.new("Raging Uppercut", HitKind.MELEE, _block(near, [1, 2, 3]), 16, Vector2i(0, -2), Rune.Dir.DOWN))
+	chest.alt = BossMove.new("Club Sweep", HitKind.MELEE, _block([front - 1], [1, 2, 3, 4, 5]), 14)
+	chest.alt_enraged = BossMove.new("Wild Flail", HitKind.MELEE, _block(near, [1, 2, 3, 4, 5]), 12)
+	boss.parts = [legs, head, chest]
+	return boss
+
+
+static func _block(xs: Array, ys: Array) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for x: int in xs:
+		for y: int in ys:
+			out.append(Vector2i(x, y))
+	return out
+
+
+func is_side_view() -> bool:
+	return not terrain.is_empty()
+
+
+func zone_of(c: Vector2i) -> Zone:
+	return terrain.get(c) as Zone
+
+
+func is_depth_row(y: int) -> bool:
+	return depth_rows.has(y)
+
+
+## For the view: a row's height (depth rows are squashed), where it starts,
+## and the whole yard's size, in zone widths.
+func row_height(y: int) -> float:
+	return DEPTH_ROW_HEIGHT if is_depth_row(y) else 1.0
+
+
+func row_top(y: int) -> float:
+	var top: float = 0.0
+	for r: int in y:
+		top += row_height(r)
+	return top
+
+
+func world_size() -> Vector2:
+	return Vector2(cols, row_top(lanes))
+
+
+## True if `c` holds a hero up. (A hero above a foe stays airborne but
+## can't fall into its zone: standing on foes is still to be designed.)
+func holds_up(c: Vector2i) -> bool:
+	if not is_side_view():
+		return true
+	var z: Zone = zone_of(c)
+	return z == null or z.holds_up()
+
+
+func is_airborne(h: Fighter) -> bool:
+	return is_side_view() and not holds_up(h.cell)
+
+
+func is_hanging(h: Fighter) -> bool:
+	return h.hang_beat != NONE and h.hang_beat == beat
+
+
+## True if a hero at `from` may move into `to` on their own: no foe there,
+## free entry, and up only within a plane or ladder to ladder.
+func can_step(from: Vector2i, to: Vector2i) -> bool:
+	if not in_bounds(to) or dummy_at(to) != null:
+		return false
+	if not is_side_view():
+		return true
+	var z: Zone = zone_of(to)
+	if not z.free_entry:
+		return false
+	if to.y >= from.y:
+		return true
+	var here: Zone = zone_of(from)
+	return here.plane == z.plane or (here.ground == Ground.LADDER and z.ground == Ground.LADDER)
+
+
+## True if knockback may carry a hero into `c`.
+func can_force_into(c: Vector2i) -> bool:
+	if not in_bounds(c) or dummy_at(c) != null:
+		return false
+	var z: Zone = zone_of(c)
+	return z == null or z.forced_entry
+
+
 func in_bounds(cell: Vector2i) -> bool:
 	return cell.x >= 0 and cell.x < cols and cell.y >= 0 and cell.y < lanes
 
@@ -447,6 +684,9 @@ func act(player: int, a: TurnAction) -> void:
 	if player >= heroes.size() or a == null:
 		return
 	var h: Fighter = heroes[player]
+	if a.beat <= h.stun_until:
+		_log("%s is stunned" % h.display_name)
+		return
 	if a.kind == TurnAction.Kind.DIRECTION:
 		_direction(h, a)
 		return
@@ -477,6 +717,15 @@ func _direction(h: Fighter, a: TurnAction) -> void:
 		h.guard_beat = a.beat
 		h.guard_dir = d
 	var to: Vector2i = h.cell + dir_offset(d)
+	if is_airborne(h) and (d == Rune.Dir.UP or d == Rune.Dir.DOWN):
+		if d == Rune.Dir.UP:
+			_hang_or_climb(h, a.beat)
+		elif shields and _hit_coming(h, a.beat, d):
+			flashed.emit([h.cell] as Array[Vector2i], BLOCK_COLOR, "BLOCK")
+			_log("%s holds the shield down and braces" % h.display_name)
+		else:
+			_plunge(h, a)
+		return
 	if dummy_at(to) != null:
 		var dmg: float = BASIC_DAMAGE * (1.0 + CHARGE_BONUS * h.charge)
 		var label: String = "Attack" if h.charge == 0 else "Heavy x%d" % h.charge
@@ -499,10 +748,87 @@ func _direction(h: Fighter, a: TurnAction) -> void:
 
 
 func _step(h: Fighter, to: Vector2i) -> void:
-	if not in_bounds(to) or dummy_at(to) != null:
+	if not can_step(h.cell, to):
 		_log("%s can't move there" % h.display_name)
 		return
 	h.cell = to
+
+
+## Up in the air. In vines: hang (no fall this beat or the next), or, on
+## the free beat after a hang, climb into the zone above if it lets a hero
+## in. Anywhere else there's nothing to grab.
+func _hang_or_climb(h: Fighter, n: int) -> void:
+	if zone_of(h.cell).ground != Ground.VINES:
+		_log("%s grabs at the air" % h.display_name)
+		return
+	var above: Vector2i = h.cell + Vector2i(0, -1)
+	if h.hang_beat == n - 1 and in_bounds(above) and dummy_at(above) == null and zone_of(above).free_entry:
+		h.cell = above
+		h.hang_beat = NONE
+		h.charge = 0
+		_log("%s climbs up" % h.display_name)
+		return
+	h.hang_beat = n
+	_log("%s hangs on the vines" % h.display_name)
+
+
+## Down in the air: drop straight down in one beat onto the first foe, or
+## else the first footing. A depth plane is searched in all its lanes, so a
+## foe on the near ground lane is hit even with the far one empty. Damage
+## grows with each lane fallen. A kill or a pushed foe leaves the hero in
+## its zone; a foe that holds leaves the hero on top of it.
+func _plunge(h: Fighter, a: TurnAction) -> void:
+	var start: Vector2i = h.cell
+	var landing: Vector2i = start
+	var target := Vector2i(-1, -1)
+	var c: Vector2i = start
+	while true:
+		c += Vector2i(0, 1)
+		if not in_bounds(c):
+			break
+		target = _plunge_target(c)
+		if target.x >= 0:
+			break
+		landing = c
+		if zone_of(c).holds_up():
+			break
+	h.hang_beat = NONE
+	if target.x < 0:
+		h.charge = 0
+		h.blessed = false
+		h.cell = landing
+		_log("%s drops %d and lands" % [h.display_name, landing.y - start.y])
+		return
+	var fell: int = target.y - start.y
+	var foe: Dummy = dummy_at(target)
+	var dmg: float = BASIC_DAMAGE * (1.0 + CHARGE_BONUS * h.charge) * (1.0 + PLUNGE_BONUS_PER_LANE * mini(fell, PLUNGE_MAX_LANES))
+	var charged: bool = h.charge > 0
+	h.charge = 0
+	_strike(h, [target] as Array[Vector2i], dmg, a, "Plunge (%d)" % fell, false, charged)
+	var shove: Vector2i = target + Vector2i(h.facing, 0)
+	if not foe.is_alive():
+		h.cell = target
+	elif not foe.is_boss() and is_free(shove) and holds_up(shove):
+		foe.cell = shove
+		h.cell = target
+		_log("%s is knocked aside" % foe.display_name)
+	else:
+		h.cell = target + Vector2i(0, -1)
+
+
+## The zone a plunge passing through `c` hits: a foe in `c`, or in a lower
+## lane of the same depth plane. (-1, -1) if none.
+func _plunge_target(c: Vector2i) -> Vector2i:
+	if dummy_at(c) != null:
+		return c
+	if is_depth_row(c.y):
+		for y: int in range(c.y + 1, lanes):
+			var below := Vector2i(c.x, y)
+			if zone_of(below).plane != zone_of(c).plane:
+				break
+			if dummy_at(below) != null:
+				return below
+	return Vector2i(-1, -1)
 
 
 ## Deals `base` (before bonuses) to the foe in each of `cells`. A boss
@@ -574,13 +900,20 @@ static func _from_front(d: Dummy, from: Vector2i) -> bool:
 ## blocked.
 func _hit_coming(h: Fighter, n: int, d: int) -> bool:
 	for dummy: Dummy in dummies:
-		if not dummy.is_alive() or _from_dir(dummy, h) != d:
+		if not dummy.is_alive():
 			continue
-		if dummy.strike_beat == n and _threatens(dummy, h) and dummy.strike_kind != HitKind.AREA:
+		if dummy.strike_beat == n and _threatens(dummy, h) and dummy.strike_kind != HitKind.AREA and _incoming_dir(dummy, h) == d:
 			return true
-		if dummy.is_leaping(n) and heroes[dummy.leap_target] == h:
+		if dummy.is_leaping(n) and heroes[dummy.leap_target] == h and _from_dir(dummy, h) == d:
 			return true
 	return false
+
+
+## The Rune.Dir a shield must face to block `dummy`'s strike on `h`: the
+## strike's own guard direction (an uppercut comes from below), or toward
+## the foe.
+static func _incoming_dir(dummy: Dummy, h: Fighter) -> int:
+	return dummy.strike_guard if dummy.strike_guard != NO_GUARD else _from_dir(dummy, h)
 
 
 func _threatens(dummy: Dummy, h: Fighter) -> bool:
@@ -616,9 +949,11 @@ static func _dir_toward(a: Vector2i, b: Vector2i) -> int:
 ## leap for the next beat from where everyone stands now.
 func end_turn(n: int) -> void:
 	beat = n
+	_fall(n)
 	for d: Dummy in dummies:
 		if not d.is_alive():
-			if d.died_on != NONE and n - d.died_on >= RESPAWN_BEATS and _can_respawn(d):
+			var wait: int = RUNNER_RESPAWN_BEATS if d.kind == Dummy.Kind.RUNNER else RESPAWN_BEATS
+			if d.died_on != NONE and n - d.died_on >= wait and _can_respawn(d):
 				d.reset()
 				_log("%s is back up" % d.display_name)
 			continue
@@ -633,6 +968,8 @@ func end_turn(n: int) -> void:
 				_strike_cycle(d, n)
 			Dummy.Kind.BOSS:
 				_boss(d, n)
+			Dummy.Kind.RUNNER:
+				_runner(d, n)
 	for d: Dummy in dummies:
 		if d.kind == Dummy.Kind.VARG and d.is_alive():
 			_plan_leap(d, n + 1)
@@ -640,6 +977,42 @@ func end_turn(n: int) -> void:
 		if h.hp <= 0:
 			h.hp = h.max_hp
 			_log("%s would have fallen. Healed for practice." % h.display_name)
+		h.was_airborne = is_airborne(h)
+
+
+## Gravity, after the heroes acted: a hero who started the beat in the air
+## and isn't held (hanging this beat or the one before) falls one zone.
+func _fall(n: int) -> void:
+	if not is_side_view():
+		return
+	for h: Fighter in heroes:
+		if not h.was_airborne or not is_airborne(h) or h.hang_beat == n or h.hang_beat == n - 1:
+			continue
+		var below: Vector2i = h.cell + Vector2i(0, 1)
+		if in_bounds(below) and dummy_at(below) == null:
+			h.cell = below
+			_log("%s falls" % h.display_name)
+
+
+## The runner dashes along the ground every beat, turning (and switching
+## ground lanes) when blocked. Harmless: it's there to plunge onto.
+func _runner(d: Dummy, n: int) -> void:
+	if d.is_rooted(n):
+		return
+	var ahead: Vector2i = d.cell + Vector2i(d.facing, 0)
+	if _runway(ahead):
+		d.cell = ahead
+		return
+	d.facing = -d.facing
+	for dy: int in [-1, 1]:
+		var side: Vector2i = d.cell + Vector2i(0, dy)
+		if _runway(side) and zone_of(side).plane == zone_of(d.cell).plane:
+			d.cell = side
+			return
+
+
+func _runway(c: Vector2i) -> bool:
+	return is_free(c) and (not is_side_view() or zone_of(c).ground == Ground.FLOOR)
 
 
 func _can_respawn(d: Dummy) -> bool:
@@ -915,11 +1288,13 @@ func _boss(d: Dummy, n: int) -> void:
 	if d.strike_beat == NONE and posmod(n - d.cycle_offset, BOSS_CYCLE) == 0:
 		var p: Part = d.parts[d.slot]
 		d.slot = (d.slot + 1) % d.parts.size()
-		var move: BossMove = p.enraged if p.broken else p.attack
+		var move: BossMove = p.next_move()
 		d.strike_beat = n + BOSS_WINDUP
 		d.strike_kind = move.kind
 		d.strike_name = move.display_name
 		d.strike_damage = move.damage
+		d.strike_knock = move.knock
+		d.strike_guard = move.guard
 		d.targets.assign(move.zones.filter(func(c: Vector2i) -> bool: return in_bounds(c)))
 		_log("The %s readies %s" % [d.display_name, move.display_name])
 
@@ -930,14 +1305,81 @@ func _boss(d: Dummy, n: int) -> void:
 func _land(d: Dummy, n: int) -> void:
 	var area: bool = d.strike_kind == HitKind.AREA
 	flashed.emit(d.targets, AREA_COLOR if area else STRIKE_COLOR, d.strike_name)
+	var footprint: Array[Vector2i] = d.targets.duplicate()
 	for h: Fighter in heroes:
-		if h.cell in d.targets:
-			_hit_hero(h, d, n, d.strike_damage, area)
+		if h.cell not in footprint:
+			continue
+		var outcome: String = _hit_hero(h, d, n, d.strike_damage, area)
+		if d.strike_knock == Vector2i.ZERO:
+			continue
+		if outcome == "HIT":
+			_knock_back(h, d, d.strike_knock)
+		else:
+			_push_to_edge(h, d, footprint, n)
 	d.targets.clear()
+	d.strike_knock = Vector2i.ZERO
+	d.strike_guard = NO_GUARD
+
+
+## Knockback steps: the vertical part first, then the horizontal.
+static func knock_steps(knock: Vector2i) -> Array[Vector2i]:
+	var steps: Array[Vector2i] = []
+	for i: int in absi(knock.y):
+		steps.append(Vector2i(0, signi(knock.y)))
+	for i: int in absi(knock.x):
+		steps.append(Vector2i(signi(knock.x), 0))
+	return steps
+
+
+## An unblocked knockback: the full path from where the hero stood. A wall,
+## a body or a zone without forced entry stops it, with crush damage.
+func _knock_back(h: Fighter, d: Dummy, knock: Vector2i) -> void:
+	h.hang_beat = NONE
+	var at: Vector2i = h.cell
+	var crushed: bool = false
+	for s: Vector2i in knock_steps(knock):
+		if not can_force_into(at + s):
+			crushed = true
+			break
+		at += s
+	h.cell = at
+	flashed.emit([at] as Array[Vector2i], KNOCK_COLOR, "KNOCKED")
+	if crushed:
+		_crush(h, d)
+
+
+## A blocked or evaded knockback attack still shoves: along the knockback
+## path only until the hero is out of the attack's footprint (past the end
+## of the path if need be). A hero who can't get out is stopped where they
+## are, crushed and stunned for the next beat.
+func _push_to_edge(h: Fighter, d: Dummy, footprint: Array[Vector2i], n: int) -> void:
+	h.hang_beat = NONE
+	var steps: Array[Vector2i] = knock_steps(d.strike_knock)
+	var at: Vector2i = h.cell
+	var i: int = 0
+	while at in footprint:
+		var s: Vector2i = steps[mini(i, steps.size() - 1)]
+		i += 1
+		if not can_force_into(at + s):
+			h.cell = at
+			h.stun_until = n + 1
+			flashed.emit([at] as Array[Vector2i], KNOCK_COLOR, "STUNNED")
+			_log("%s is pinned and stunned" % h.display_name)
+			_crush(h, d)
+			return
+		at += s
+	h.cell = at
+	flashed.emit([at] as Array[Vector2i], KNOCK_COLOR, "PUSHED")
+
+
+func _crush(h: Fighter, d: Dummy) -> void:
+	var lost: int = h.take_damage(CRUSH_DAMAGE)
+	flashed.emit([h.cell] as Array[Vector2i], STRIKE_COLOR, "CRUSH %d" % lost)
+	_log("%s is crushed against the wall by the %s for %d" % [h.display_name, d.display_name, lost])
 
 
 func _guards(h: Fighter, d: Dummy, n: int) -> bool:
-	return h.guard_beat == n and h.guard_dir == _from_dir(d, h)
+	return h.guard_beat == n and h.guard_dir == _incoming_dir(d, h)
 
 
 ## Resolves a hit from foe `d` on `h`: "EVADE", "BLOCK" or "HIT".

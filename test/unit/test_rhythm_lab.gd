@@ -150,3 +150,23 @@ func test_yard_option_switches_to_the_boss() -> void:
 	lab.rules.end_turn(0)
 	await wait_process_frames(3)
 	assert_eq(lab.rules.dummies[0].strike_name, "Club Sweep")
+
+
+func test_cave_camera_zooms_out_as_heroes_spread() -> void:
+	lab.set_two_players(true)
+	lab.get_node("%Yard").item_selected.emit(SparringRules.Yard.CAVE)
+	assert_eq(lab.rules.yard, SparringRules.Yard.CAVE)
+	var arena: SparringView = lab.get_node("%Arena")
+	var world: Vector2 = lab.rules.world_size()
+	assert_lt(arena.camera_target().size.y, world.y, "starts at the default zoom on the ground")
+	lab.rules.heroes[0].cell = Vector2i(0, 0)
+	assert_gt(arena.camera_target().size.y, SparringView.DEFAULT_VIEW_HEIGHT + 1.0, "zoomed out to fit both")
+	lab.rules.heroes[0].cell = Vector2i(2, 5)
+	lab.get_node("%WideView").toggled.emit(true)
+	assert_almost_eq(arena.camera_target().size.y, maxf(world.y, world.x * arena.size.y / arena.size.x), 0.01, "wide view shows it all")
+	# Draw a knockback tell and a hanging hero, to catch drawing errors.
+	lab.rules.heroes[1].cell = Vector2i(3, 2)
+	lab.rules.heroes[1].hang_beat = 0
+	lab.rules.end_turn(0)
+	await wait_process_frames(3)
+	assert_eq(lab.rules.dummies[1].strike_name, "Kick")

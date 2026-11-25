@@ -635,3 +635,249 @@ func test_bleeding_out_earns_no_glory() -> void:
 	rules.end_turn(0)
 	assert_false(boss.is_alive())
 	assert_eq(hero.glory, 0)
+
+
+# --- The cave (side view) ---
+
+func _cave(players: int = 1) -> SparringRules.Dummy:
+	rules = SparringRules.new(players, true, SparringRules.Yard.CAVE)
+	hero = rules.heroes[0]
+	return _dummy(SparringRules.Dummy.Kind.BOSS)
+
+
+func _airborne_at(cell: Vector2i) -> void:
+	hero.cell = cell
+	hero.was_airborne = true
+
+
+## Runs end_turn through the boss's wind-up so its first attack lands on
+## beat 2, after `before_land` (if any) acts on beat 2.
+func _boss_lands(before_land: Callable = Callable()) -> void:
+	rules.end_turn(0)
+	rules.end_turn(1)
+	if before_land.is_valid():
+		before_land.call()
+	rules.end_turn(2)
+
+
+func test_cave_terrain_and_boss() -> void:
+	var boss: SparringRules.Dummy = _cave()
+	assert_eq(Vector2i(rules.cols, rules.lanes), SparringRules.CAVE_SIZE)
+	assert_eq(boss.footprint.size(), 18)
+	assert_eq(rules.zone_of(Vector2i(3, 0)).ground, SparringRules.Ground.VINES)
+	assert_eq(rules.zone_of(Vector2i(3, 1)).ground, SparringRules.Ground.LEDGE)
+	assert_eq(rules.zone_of(Vector2i(3, 2)).ground, SparringRules.Ground.VINES)
+	assert_eq(rules.zone_of(Vector2i(3, 3)).ground, SparringRules.Ground.AIR)
+	assert_eq(rules.zone_of(Vector2i(0, 0)).ground, SparringRules.Ground.LADDER)
+	assert_true(rules.is_depth_row(4) and rules.is_depth_row(5))
+	assert_false(rules.is_depth_row(3))
+	assert_almost_eq(rules.world_size().y, 4.0 + 2.0 * SparringRules.DEPTH_ROW_HEIGHT, 0.001)
+
+
+func test_ground_lanes_are_depth_but_going_up_needs_a_ladder() -> void:
+	_cave()
+	_keep([])
+	hero.cell = Vector2i(3, 5)
+	_go(Rune.Dir.UP, 0)
+	assert_eq(hero.cell, Vector2i(3, 4), "the two ground lanes are one level")
+	_go(Rune.Dir.UP, 1)
+	assert_eq(hero.cell, Vector2i(3, 4), "no climbing into the air")
+	hero.cell = Vector2i(0, 4)
+	_go(Rune.Dir.UP, 2)
+	assert_eq(hero.cell, Vector2i(0, 3), "the ladder goes up")
+	hero.cell = Vector2i(3, 1)
+	_go(Rune.Dir.UP, 3)
+	assert_eq(hero.cell, Vector2i(3, 1), "no moving up off the catwalk")
+
+
+func test_dropping_off_the_catwalk_falls_a_zone_a_beat() -> void:
+	_cave()
+	_keep([])
+	hero.cell = Vector2i(3, 1)
+	_go(Rune.Dir.DOWN, 0)
+	rules.end_turn(0)
+	assert_eq(hero.cell, Vector2i(3, 2), "no fall on the beat you stepped off")
+	rules.end_turn(1)
+	assert_eq(hero.cell, Vector2i(3, 3))
+	rules.end_turn(2)
+	assert_eq(hero.cell, Vector2i(3, 4), "landed on the ground")
+	rules.end_turn(3)
+	assert_eq(hero.cell, Vector2i(3, 4))
+
+
+func test_moving_while_falling_drifts() -> void:
+	_cave()
+	_keep([])
+	_airborne_at(Vector2i(3, 3))
+	_go(Rune.Dir.LEFT, 0)
+	rules.end_turn(0)
+	assert_eq(hero.cell, Vector2i(2, 4))
+
+
+func test_a_hang_holds_for_the_free_beat_then_falls() -> void:
+	_cave()
+	_keep([])
+	_airborne_at(Vector2i(3, 2))
+	_go(Rune.Dir.UP, 0)
+	rules.end_turn(0)
+	assert_eq(hero.cell, Vector2i(3, 2))
+	assert_true(rules.is_hanging(hero))
+	_go(Rune.Dir.LEFT, 1)
+	rules.end_turn(1)
+	assert_eq(hero.cell, Vector2i(2, 2), "the free beat moved along the vines")
+	rules.end_turn(2)
+	assert_eq(hero.cell, Vector2i(2, 3), "no new hang: falls")
+
+
+func test_up_after_a_hang_climbs_onto_the_catwalk() -> void:
+	_cave()
+	_keep([])
+	_airborne_at(Vector2i(3, 2))
+	_go(Rune.Dir.UP, 0)
+	rules.end_turn(0)
+	_go(Rune.Dir.UP, 1)
+	rules.end_turn(1)
+	assert_eq(hero.cell, Vector2i(3, 1))
+	assert_false(rules.is_airborne(hero))
+
+
+func test_plunge_finds_a_foe_on_the_near_ground_lane() -> void:
+	_cave()
+	_keep([SparringRules.Dummy.Kind.RUNNER])
+	var runner: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.RUNNER)
+	runner.cell = Vector2i(3, 5)
+	_airborne_at(Vector2i(3, 2))
+	_go(Rune.Dir.DOWN, 0)
+	var dmg: int = roundi(SparringRules.BASIC_DAMAGE * (1.0 + SparringRules.PLUNGE_BONUS_PER_LANE * 3))
+	assert_eq(runner.hp, SparringRules.RUNNER_HP - dmg, "+25% for each of 3 lanes")
+	assert_eq(runner.cell, Vector2i(4, 5), "pushed the way the hero faces")
+	assert_eq(hero.cell, Vector2i(3, 5))
+
+
+func test_a_killing_plunge_takes_the_zone() -> void:
+	_cave()
+	_keep([SparringRules.Dummy.Kind.RUNNER])
+	var runner: SparringRules.Dummy = _dummy(SparringRules.Dummy.Kind.RUNNER)
+	runner.cell = Vector2i(3, 4)
+	runner.hp = 5
+	_airborne_at(Vector2i(3, 3))
+	_go(Rune.Dir.DOWN, 0)
+	assert_false(runner.is_alive())
+	assert_eq(hero.cell, Vector2i(3, 4))
+	assert_eq(hero.glory, SparringRules.KILL_GLORY)
+
+
+func test_a_plunge_onto_nothing_lands() -> void:
+	_cave()
+	_keep([])
+	_airborne_at(Vector2i(3, 2))
+	_go(Rune.Dir.DOWN, 0)
+	assert_eq(hero.cell, Vector2i(3, 4))
+
+
+func test_the_jotunn_alternates_each_parts_two_attacks() -> void:
+	_cave()
+	_keep([SparringRules.Dummy.Kind.BOSS])
+	hero.cell = Vector2i(1, 5)
+	var names: Array[String] = []
+	for n: int in 21:
+		rules.end_turn(n)
+		if n % 4 == 0:
+			names.append(rules.dummies[0].strike_name)
+	assert_eq(names, ["Kick", "Headbutt", "Uppercut", "Stomp", "Frost Breath", "Club Sweep"] as Array[String])
+
+
+func test_kick_knocks_each_hero_from_where_they_stood() -> void:
+	_cave(2)
+	_keep([SparringRules.Dummy.Kind.BOSS])
+	var other: SparringRules.Fighter = rules.heroes[1]
+	hero.cell = Vector2i(5, 5)
+	other.cell = Vector2i(6, 5)
+	_boss_lands()
+	assert_eq(hero.cell, Vector2i(3, 4), "up 1, left 2")
+	assert_eq(other.cell, Vector2i(4, 4), "neighbours end as neighbours")
+	assert_eq(hero.hp, SparringRules.HERO_HP - 12)
+
+
+func test_blocking_the_kick_only_pushes_to_its_edge() -> void:
+	_cave()
+	_keep([SparringRules.Dummy.Kind.BOSS])
+	hero.cell = Vector2i(5, 5)
+	_boss_lands(func() -> void: _go(Rune.Dir.RIGHT, 2))
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+	assert_eq(hero.cell, Vector2i(4, 4), "out of the kick, not the full knockback")
+
+
+func test_uppercut_on_the_catwalk_crushes_into_the_ceiling() -> void:
+	var boss: SparringRules.Dummy = _cave()
+	_keep([SparringRules.Dummy.Kind.BOSS])
+	boss.slot = 2
+	hero.cell = Vector2i(6, 1)
+	_boss_lands()
+	assert_eq(boss.strike_name, "Uppercut")
+	assert_eq(hero.cell, Vector2i(6, 0))
+	assert_eq(hero.hp, SparringRules.HERO_HP - 12 - SparringRules.CRUSH_DAMAGE)
+
+
+func test_blocking_the_uppercut_downward_lands_on_the_ceiling_vines() -> void:
+	var boss: SparringRules.Dummy = _cave()
+	_keep([SparringRules.Dummy.Kind.BOSS])
+	boss.slot = 2
+	hero.cell = Vector2i(6, 1)
+	_boss_lands(func() -> void: _go(Rune.Dir.DOWN, 2))
+	assert_eq(hero.hp, SparringRules.HERO_HP, "a shield facing down blocks it")
+	assert_eq(hero.cell, Vector2i(6, 0))
+	_go(Rune.Dir.UP, 3)
+	rules.end_turn(3)
+	assert_eq(hero.cell, Vector2i(6, 0), "caught the vines")
+
+
+func test_headbutt_knocks_off_the_catwalk_into_the_air() -> void:
+	var boss: SparringRules.Dummy = _cave()
+	_keep([SparringRules.Dummy.Kind.BOSS])
+	boss.slot = 1
+	hero.cell = Vector2i(6, 1)
+	_boss_lands()
+	assert_eq(boss.strike_name, "Headbutt")
+	assert_eq(hero.cell, Vector2i(4, 3), "down 2, left 2")
+	rules.end_turn(3)
+	assert_eq(hero.cell, Vector2i(4, 4), "falls on the next beat")
+
+
+func test_blocking_the_headbutt_drops_only_to_the_vines() -> void:
+	var boss: SparringRules.Dummy = _cave()
+	_keep([SparringRules.Dummy.Kind.BOSS])
+	boss.slot = 1
+	hero.cell = Vector2i(6, 1)
+	_boss_lands(func() -> void: _go(Rune.Dir.RIGHT, 2))
+	assert_eq(hero.hp, SparringRules.HERO_HP)
+	assert_eq(hero.cell, Vector2i(6, 2))
+
+
+func test_a_zone_closed_to_forced_entry_stops_knockback_with_a_crush() -> void:
+	_cave()
+	_keep([SparringRules.Dummy.Kind.BOSS])
+	rules.zone_of(Vector2i(4, 4)).forced_entry = false
+	hero.cell = Vector2i(5, 5)
+	_boss_lands()
+	assert_eq(hero.cell, Vector2i(5, 4))
+	assert_eq(hero.hp, SparringRules.HERO_HP - 12 - SparringRules.CRUSH_DAMAGE)
+
+
+func test_pinned_short_of_the_edge_is_crushed_and_stunned() -> void:
+	var boss: SparringRules.Dummy = _cave()
+	_keep([SparringRules.Dummy.Kind.BOSS])
+	boss.strike_beat = 1
+	boss.strike_kind = SparringRules.HitKind.MELEE
+	boss.strike_name = "Shove"
+	boss.strike_damage = 10
+	boss.strike_knock = Vector2i(-2, 0)
+	boss.strike_guard = Rune.Dir.RIGHT
+	boss.targets.assign([Vector2i(0, 5), Vector2i(1, 5)])
+	hero.cell = Vector2i(1, 5)
+	_go(Rune.Dir.RIGHT, 1)
+	rules.end_turn(1)
+	assert_eq(hero.cell, Vector2i(0, 5), "stopped in the attack's last zone")
+	assert_eq(hero.hp, SparringRules.HERO_HP - SparringRules.CRUSH_DAMAGE)
+	_go(Rune.Dir.RIGHT, 2)
+	assert_eq(hero.cell, Vector2i(0, 5), "stunned for the next beat")

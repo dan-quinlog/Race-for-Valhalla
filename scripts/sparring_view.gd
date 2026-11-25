@@ -7,8 +7,23 @@ extends Control
 ## hits that can't be blocked), and the heroes with a facing arrow, shield, Heavy
 ## charge glow and blessing ring. Attacks flash the zones they hit, with
 ## BLOCK / EVADE pops. Placeholder shapes until real sprites.
+##
+## A side-view yard (the cave) is drawn through a camera window in zone
+## units: depth rows are squashed, with sprites standing up out of them,
+## and terrain is drawn per zone (vines, catwalk planks, ladder). The camera
+## prefers DEFAULT_VIEW_HEIGHT on the ground and zooms out to keep every
+## hero (and the boss's front) in view; `always_wide` shows the whole yard.
 
 const GAP: float = 4.0
+const DEFAULT_VIEW_HEIGHT: float = 3.2
+const CAMERA_MARGIN: float = 0.5
+const CAMERA_SPEED: float = 5.0
+const FLOOR_FILL := Color(0.45, 0.35, 0.25, 0.25)
+const VINE_COLOR := Color(0.35, 0.65, 0.3)
+const PLANK_COLOR := Color(0.55, 0.4, 0.25)
+const LADDER_COLOR := Color(0.7, 0.55, 0.35)
+const KNOCK_ARROW := Color(1, 1, 1, 0.85)
+const RUNNER_COLOR := Color(0.7, 0.6, 0.45)
 const ZONE_FILL := Color(1, 1, 1, 0.03)
 const BEAT_COLOR := Color(0.95, 0.8, 0.45)
 const BEAT_PULSE_TIME: float = 0.3
@@ -48,7 +63,13 @@ var rules: SparringRules:
 		if rules != null:
 			rules.flashed.connect(_on_flashed)
 			rules.shot.connect(_on_shot)
+			if rules.is_side_view():
+				_win = camera_target()
 		queue_redraw()
+## Side view: show the whole yard instead of following the heroes.
+var always_wide: bool = false
+## Side view: the camera's window onto the yard, in zone units.
+var _win := Rect2()
 ## The beat that started last (on the buh).
 var beat_index: int = -1
 var _beat_pulse: float = 0.0
@@ -80,8 +101,18 @@ func _on_flashed(cells: Array[Vector2i], color: Color, text: String) -> void:
 	_flashes.append({"cells": cells.duplicate(), "color": color, "text": text, "left": FLASH_TIME})
 
 
+func _ready() -> void:
+	clip_contents = true
+
+
 func _process(delta: float) -> void:
 	_time += delta
+	if _side():
+		var target: Rect2 = camera_target()
+		var k: float = 1.0 - exp(-delta * CAMERA_SPEED)
+		if _win.size.x <= 0.0:
+			k = 1.0
+		_win = Rect2(_win.position.lerp(target.position, k), _win.size.lerp(target.size, k))
 	_beat_pulse = maxf(0.0, _beat_pulse - delta / BEAT_PULSE_TIME)
 	for f: Dictionary in _flashes:
 		f.left -= delta
@@ -92,14 +123,76 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
+func _side() -> bool:
+	return rules != null and rules.is_side_view()
+
+
+## A full (height) zone's size on screen.
 func zone_size() -> Vector2:
+	if _side():
+		return Vector2.ONE * _view_scale()
 	var grid := Vector2(SparringRules.YARD_SIZE) if rules == null else Vector2(rules.cols, rules.lanes)
 	return size / grid
 
 
 func cell_rect(cell: Vector2i) -> Rect2:
+	if _side():
+		var sc: float = _view_scale()
+		var at: Vector2 = _to_screen(Vector2(cell.x, rules.row_top(cell.y)))
+		var r := Rect2(at, Vector2(1.0, rules.row_height(cell.y)) * sc)
+		return r.grow(-GAP * 0.5)
 	var z: Vector2 = zone_size()
 	return Rect2(Vector2(cell.x * z.x, cell.y * z.y) + Vector2(GAP, GAP) * 0.5, z - Vector2(GAP, GAP))
+
+
+## Where a foe or hero is drawn: its zone, or in a depth row a square box
+## standing up out of the zone's bottom, overlapping the row behind.
+func sprite_rect(cell: Vector2i) -> Rect2:
+	var r: Rect2 = cell_rect(cell)
+	if _side() and rules.is_depth_row(cell.y):
+		return Rect2(r.position.x, r.end.y - r.size.x, r.size.x, r.size.x)
+	return r
+
+
+func _view_scale() -> float:
+	if _win.size.x <= 0.0 or _win.size.y <= 0.0:
+		return 1.0
+	return minf(size.x / _win.size.x, size.y / _win.size.y)
+
+
+func _to_screen(p: Vector2) -> Vector2:
+	var sc: float = _view_scale()
+	return (p - _win.position) * sc + (size - _win.size * sc) * 0.5
+
+
+## The window the camera eases toward, in zone units: DEFAULT_VIEW_HEIGHT
+## resting on the ground, grown to fit every hero (plus a margin) and the
+## boss's front column, never past the whole yard. `always_wide`: the whole
+## yard.
+func camera_target() -> Rect2:
+	var world: Vector2 = rules.world_size()
+	var aspect: float = size.x / size.y if size.x > 0.0 and size.y > 0.0 else 2.0
+	var full_h: float = maxf(world.y, world.x / aspect)
+	var need := Rect2()
+	for h: SparringRules.Fighter in rules.heroes:
+		var r := Rect2(h.cell.x, rules.row_top(h.cell.y), 1.0, rules.row_height(h.cell.y)).grow(CAMERA_MARGIN)
+		need = r if need.size == Vector2.ZERO else need.merge(r)
+	for d: SparringRules.Dummy in rules.dummies:
+		if d.is_boss() and d.is_alive():
+			var front: int = d.footprint[0].x
+			for z: Vector2i in d.footprint:
+				front = mini(front, z.x)
+			need = need.merge(Rect2(front, need.position.y, 1.0, need.size.y))
+	var h_view: float = full_h if always_wide else maxf(minf(DEFAULT_VIEW_HEIGHT, world.y), maxf(need.size.y, need.size.x / aspect))
+	h_view = minf(h_view, full_h)
+	var w_view: float = h_view * aspect
+	var x: float = (world.x - w_view) * 0.5
+	if w_view < world.x:
+		x = clampf(need.get_center().x - w_view * 0.5, 0.0, world.x - w_view)
+	var y: float = (world.y - h_view) * 0.5
+	if h_view < world.y:
+		y = clampf(minf(world.y - h_view, need.position.y), 0.0, world.y - h_view)
+	return Rect2(x, y, w_view, h_view)
 
 
 func _draw() -> void:
@@ -123,11 +216,22 @@ func _draw() -> void:
 			var r0: Rect2 = cell_rect(f.cells[0])
 			var rise: float = (1.0 - a) * 12.0
 			draw_string(font, Vector2(r0.position.x + 4, r0.position.y + text_size * 2 + 6 - rise), f.text, HORIZONTAL_ALIGNMENT_LEFT, -1, text_size + 2, Color(1, 1, 1, a))
+	# The boss behind everything, then foes and heroes back row to front
+	# row so nearer sprites overlap the ones behind.
+	var bodies: Array = []
 	for d: SparringRules.Dummy in rules.dummies:
 		if d.is_alive():
-			_draw_dummy(d, open_beat, font, text_size)
-	for h: SparringRules.Fighter in rules.heroes:
-		_draw_hero(h, open_beat, font, text_size)
+			if d.is_boss():
+				_draw_boss(d, open_beat, font, text_size)
+			else:
+				bodies.append(d)
+	bodies.append_array(rules.heroes)
+	bodies.sort_custom(func(a: Combatant, b: Combatant) -> bool: return a.cell.y < b.cell.y)
+	for b: Variant in bodies:
+		if b is SparringRules.Fighter:
+			_draw_hero(b, open_beat, font, text_size)
+		else:
+			_draw_dummy(b, open_beat, font, text_size)
 	for a: Dictionary in _shots:
 		_draw_shot(a)
 
@@ -153,6 +257,30 @@ func _draw_zone(cell: Vector2i) -> void:
 	var r: Rect2 = cell_rect(cell)
 	draw_rect(r, ZONE_FILL)
 	var border: Color = BEAT_COLOR * Color(1, 1, 1, 0.3 + 0.6 * _beat_pulse)
+	if _side():
+		var z: SparringRules.Zone = rules.zone_of(cell)
+		match z.ground:
+			SparringRules.Ground.FLOOR:
+				draw_rect(r, FLOOR_FILL)
+			SparringRules.Ground.AIR:
+				border.a *= 0.4
+			SparringRules.Ground.VINES:
+				border.a *= 0.6
+				for i: int in 4:
+					var x: float = r.position.x + r.size.x * (0.14 + 0.24 * i)
+					var pts := PackedVector2Array()
+					for k: int in 7:
+						pts.append(Vector2(x + (4.0 if k % 2 == 1 else -4.0), r.position.y + r.size.y * 0.7 * k / 6.0))
+					draw_polyline(pts, VINE_COLOR, 2.0)
+			SparringRules.Ground.LEDGE:
+				draw_rect(Rect2(r.position.x - GAP, r.end.y - r.size.y * 0.12, r.size.x + GAP * 2.0, r.size.y * 0.12), PLANK_COLOR)
+			SparringRules.Ground.LADDER:
+				for fx: float in [0.25, 0.75]:
+					var x: float = r.position.x + r.size.x * fx
+					draw_line(Vector2(x, r.position.y - GAP), Vector2(x, r.end.y + GAP), LADDER_COLOR, 3.0)
+				for k: int in 4:
+					var y: float = r.position.y + r.size.y * (0.125 + 0.25 * k)
+					draw_line(Vector2(r.position.x + r.size.x * 0.25, y), Vector2(r.position.x + r.size.x * 0.75, y), LADDER_COLOR, 2.0)
 	draw_rect(r, border, false, 1.5 + 2.5 * _beat_pulse)
 
 
@@ -169,14 +297,45 @@ func _draw_tell(d: SparringRules.Dummy, open_beat: int, font: Font, text_size: i
 	if d.kind != SparringRules.Dummy.Kind.ARCHER and not d.targets.is_empty():
 		var r0: Rect2 = cell_rect(d.targets[0])
 		var label: String = d.strike_name + (" (AREA: evade only)" if area else "")
+		if d.strike_knock != Vector2i.ZERO:
+			label += " " + knock_text(d.strike_knock)
 		draw_string(font, Vector2(r0.position.x + 6, r0.end.y - 6), label, HORIZONTAL_ALIGNMENT_LEFT, -1, text_size, hot * Color(1, 1, 1, 2))
+	if d.strike_knock != Vector2i.ZERO and not d.targets.is_empty():
+		_draw_knock(d)
+
+
+## "↑1 ←2": a knockback, vertical part first.
+static func knock_text(k: Vector2i) -> String:
+	var parts: Array[String] = []
+	if k.y != 0:
+		parts.append("%s%d" % ["↑" if k.y < 0 else "↓", absi(k.y)])
+	if k.x != 0:
+		parts.append("%s%d" % ["←" if k.x < 0 else "→", absi(k.x)])
+	return " ".join(parts)
+
+
+## The knockback path as an arrow from the middle of the attack: down or up
+## first, then across.
+func _draw_knock(d: SparringRules.Dummy) -> void:
+	var area := cell_rect(d.targets[0])
+	for c: Vector2i in d.targets:
+		area = area.merge(cell_rect(c))
+	var z: Vector2 = zone_size()
+	var p0: Vector2 = area.get_center()
+	var p1: Vector2 = p0 + Vector2(0, d.strike_knock.y * z.y)
+	var p2: Vector2 = p1 + Vector2(d.strike_knock.x * z.x, 0)
+	draw_polyline(PackedVector2Array([p0, p1, p2]), KNOCK_ARROW, 4.0)
+	var last: Vector2 = p2 - p1 if p2 != p1 else p1 - p0
+	var dir: Vector2 = last.normalized()
+	var head: float = z.x * 0.15
+	draw_colored_polygon(PackedVector2Array([p2 + dir * head, p2 - dir * head * 0.5 + dir.orthogonal() * head * 0.7, p2 - dir * head * 0.5 - dir.orthogonal() * head * 0.7]), KNOCK_ARROW)
 
 
 func _draw_dummy(d: SparringRules.Dummy, open_beat: int, font: Font, text_size: int) -> void:
 	if d.is_boss():
 		_draw_boss(d, open_beat, font, text_size)
 		return
-	var r: Rect2 = cell_rect(d.cell)
+	var r: Rect2 = sprite_rect(d.cell)
 	var c: Vector2 = r.get_center() + Vector2(0, r.size.y * 0.05)
 	var s: float = minf(r.size.x, r.size.y) * 0.24
 	match d.kind:
@@ -201,6 +360,9 @@ func _draw_dummy(d: SparringRules.Dummy, open_beat: int, font: Font, text_size: 
 				draw_line(c, tip, TEXT_COLOR, 2.0)
 		SparringRules.Dummy.Kind.ARCHER:
 			draw_colored_polygon(PackedVector2Array([c + Vector2(-s, 0), c + Vector2(s, -s), c + Vector2(s, s)]), ARCHER_COLOR)
+		SparringRules.Dummy.Kind.RUNNER:
+			draw_rect(Rect2(c - Vector2(s, s * 0.3), Vector2(s * 2.0, s * 0.9)), RUNNER_COLOR)
+			draw_circle(c + Vector2(d.facing * s * 1.1, -s * 0.2), s * 0.4, RUNNER_COLOR)
 	if d.is_vulnerable(open_beat):
 		draw_arc(c, s * 1.35, 0.0, TAU, 24, VULN_COLOR, 3.0)
 	var bar := Rect2(c.x - s, c.y - s - 10.0, s * 2.0, 5.0)
@@ -217,7 +379,7 @@ func _draw_dummy(d: SparringRules.Dummy, open_beat: int, font: Font, text_size: 
 
 
 func _draw_hero(h: SparringRules.Fighter, open_beat: int, font: Font, text_size: int) -> void:
-	var r: Rect2 = cell_rect(h.cell)
+	var r: Rect2 = sprite_rect(h.cell)
 	var slot: float = 0.3 if h.player == 0 else 0.62
 	var c := Vector2(r.position.x + r.size.x * slot, r.get_center().y)
 	var s: float = minf(r.size.x, r.size.y) * 0.17
@@ -247,6 +409,12 @@ func _draw_hero(h: SparringRules.Fighter, open_beat: int, font: Font, text_size:
 		tags.append("HEAVY x%d EXPOSED" % h.charge)
 	if h.blessed:
 		tags.append("BLESSED")
+	if h.stun_until > rules.beat:
+		tags.append("STUNNED")
+	if rules.is_hanging(h):
+		tags.append("HANGING")
+	elif rules.is_airborne(h):
+		tags.append("FALLING")
 	draw_string(font, Vector2(c.x - s * 1.5, c.y + s + text_size + 2), " ".join(tags), HORIZONTAL_ALIGNMENT_LEFT, -1, text_size - 2, col)
 
 
