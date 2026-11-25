@@ -11,67 +11,112 @@ func before_each() -> void:
 	await wait_process_frames(2)
 
 
-func _press(action: StringName) -> void:
-	var ev := InputEventAction.new()
-	ev.action = action
-	ev.pressed = true
-	lab._unhandled_input(ev)
+func _period() -> float:
+	return lab.panels[0].input.judge.period
 
 
-func _presses(panel: PlayerPanel) -> int:
-	var c: ComboTracker = panel.rhythm.combo
+func _presses(panel: TurnPanel) -> int:
+	var c: ComboTracker = panel.input.combo
 	return c.perfects + c.goods + c.misses
 
 
-func test_starts_solo_with_p2_hidden() -> void:
+func _event(action: StringName) -> InputEventAction:
+	var ev := InputEventAction.new()
+	ev.action = action
+	ev.pressed = true
+	return ev
+
+
+func test_starts_solo_with_rune_buttons_and_a_shield() -> void:
 	assert_false(lab.two_players)
 	assert_false(lab.panels[1].visible)
-	assert_string_contains(lab.panels[0].get_node("%RunePad").get_node("%Up").text, "W / ↑")
+	assert_eq(lab.binding, lab.Binding.RUNE_BUTTONS)
+	assert_true(lab.rules.shields)
+	var pad: DirectionPad = lab.panels[0].get_node("%Pad")
+	assert_string_contains(pad.rune_button(RuneCorner.Kind.PRAYER).text, "[Q]")
+	assert_string_contains(pad.dir_button(Rune.Dir.UP).text, "W / ↑")
 
 
-func test_solo_routes_both_key_sets_to_p1() -> void:
-	_press(&"p1_left")
-	_press(&"p2_left")
+func test_direction_moves_the_hero_at_the_dum() -> void:
+	lab.press_dir(0, Rune.Dir.UP, _period() * 3)
+	lab._on_beat_closed(3)
+	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 1))
+
+
+func test_chord_casts_the_rune() -> void:
+	var t: float = _period() * 3
+	lab.press_dir(0, Rune.Dir.UP, t)
+	lab.press_dir(0, Rune.Dir.RIGHT, t + 0.05)
+	lab._on_beat_closed(3)
+	assert_eq(lab.rules.heroes[0].charge, 1)
+	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 2))
+
+
+func test_rune_button_action_casts_directly() -> void:
+	lab._unhandled_input(_event(RuneCorner.action_name(0, RuneCorner.Kind.PRAYER)))
+	assert_eq(_presses(lab.panels[0]), 1)
+
+
+func test_directions_binding_ignores_rune_buttons() -> void:
+	lab.set_binding(lab.Binding.DIRECTIONS)
+	lab._unhandled_input(_event(RuneCorner.action_name(0, RuneCorner.Kind.PRAYER)))
+	assert_eq(_presses(lab.panels[0]), 0)
+	assert_string_contains(lab.panels[0].get_node("%Pad").rune_button(RuneCorner.Kind.PRAYER).text, "[W+A]")
+
+
+func test_solo_routes_both_input_sets_to_p1() -> void:
+	lab.press_dir(0, Rune.Dir.LEFT, _period() * 2)
+	lab._on_beat_closed(2)
+	lab.press_dir(1, Rune.Dir.LEFT, _period() * 3)
 	assert_eq(_presses(lab.panels[0]), 2)
 	assert_eq(_presses(lab.panels[1]), 0)
 
 
-func test_two_players_route_separately() -> void:
+func test_two_players_on_one_keyboard() -> void:
 	lab.set_two_players(true)
 	assert_true(lab.panels[1].visible)
-	_press(&"p1_down")
-	_press(&"p2_up")
-	assert_eq(_presses(lab.panels[0]), 1)
-	assert_eq(_presses(lab.panels[1]), 1)
-	assert_eq(lab.get_node("%TwoPlayers").button_pressed, true)
+	assert_eq(lab.rules.heroes.size(), 2)
+	lab.press_dir(0, Rune.Dir.UP, _period() * 3)
+	lab.press_dir(1, Rune.Dir.DOWN, _period() * 3)
+	lab._on_beat_closed(3)
+	assert_eq(lab.rules.heroes[0].cell, Vector2i(1, 1))
+	assert_eq(lab.rules.heroes[1].cell, Vector2i(1, 4))
 
 
-func test_players_judge_the_same_beat_independently() -> void:
-	lab.set_two_players(true)
-	var period: float = lab.panels[0].rhythm.judge.period
-	assert_eq(lab.panels[0].submit(Rune.Dir.LEFT, period * 3).judgment.grade, BeatJudge.Grade.PERFECT)
-	assert_eq(lab.panels[1].submit(Rune.Dir.LEFT, period * 3).judgment.grade, BeatJudge.Grade.PERFECT)
+func test_shield_toggle_rebuilds_the_yard() -> void:
+	lab.set_shields(false)
+	assert_false(lab.rules.shields)
+	assert_false(lab.get_node("%Shield").button_pressed)
+
+
+func test_status_shows_charge_and_blessing() -> void:
+	var t: float = _period() * 3
+	lab.press_rune(0, RuneCorner.Kind.HEAVY, t)
+	lab._on_beat_closed(3)
+	lab.press_rune(0, RuneCorner.Kind.PRAYER, t + _period())
+	lab._on_beat_closed(4)
+	var status: String = lab.panels[0].get_node("%StatusLabel").text
+	assert_string_contains(status, "Heavy x1")
+	assert_string_contains(status, "Blessed")
 
 
 func test_bpm_change_reconfigures_players() -> void:
-	lab.panels[0].submit(Rune.Dir.DOWN, lab.panels[0].rhythm.judge.period)
 	lab.get_node("%Bpm").value = 120.0
-	assert_almost_eq(lab.panels[0].rhythm.judge.period, 0.5, 0.001)
-	assert_almost_eq(lab.panels[1].rhythm.judge.period, 0.5, 0.001)
-	assert_eq(lab.panels[0].rhythm.reader.pending, CommandReader.NO_RUNE)
+	assert_almost_eq(lab.panels[0].input.judge.period, 0.5, 0.001)
+	assert_almost_eq(lab.panels[1].input.judge.period, 0.5, 0.001)
 
 
 func test_window_is_clamped_below_half_period() -> void:
 	lab.get_node("%Bpm").value = 160.0
 	lab.get_node("%WindowMs").value = 250.0
-	var judge: BeatJudge = lab.panels[0].rhythm.judge
+	var judge: BeatJudge = lab.panels[0].input.judge
 	assert_lt(judge.window * 2.0, judge.period)
 
 
-func test_beats_expire_pending_commands() -> void:
-	lab.panels[0].submit(Rune.Dir.RIGHT, lab.panels[0].rhythm.judge.period)
-	lab._on_beat(3)
-	assert_eq(lab.panels[0].rhythm.reader.pending, CommandReader.NO_RUNE)
+func test_attacks_flash_the_arena() -> void:
+	lab.press_rune(0, RuneCorner.Kind.FLOURISH, _period() * 3)
+	lab._on_beat_closed(3)
+	assert_gt(lab.get_node("%Arena").flash_count(), 0)
 
 
 func test_stage_button_opens_stage() -> void:
@@ -87,3 +132,41 @@ func test_ekg_wave_peaks_on_buh() -> void:
 	assert_almost_eq(ekg.wave(0.0), 1.0, 0.05)
 	assert_lt(ekg.wave(ekg.period * 0.5), 0.05)
 	assert_gt(ekg.wave(0.0), ekg.wave(ekg.dum_delay))
+
+
+func test_arrow_is_drawn_where_it_stops() -> void:
+	lab.rules.end_turn(2)
+	lab.rules.end_turn(4)
+	assert_eq(lab.get_node("%Arena").shot_count(), 1)
+
+
+func test_yard_option_switches_to_the_boss() -> void:
+	lab.get_node("%Yard").item_selected.emit(SparringRules.Yard.BOSS)
+	assert_eq(lab.rules.yard, SparringRules.Yard.BOSS)
+	assert_true(lab.rules.dummies[0].is_boss())
+	assert_eq(lab.get_node("%Arena").rules, lab.rules)
+	# Draw the boss with a telegraphed attack up, to catch drawing errors.
+	lab.rules.dummies[0].part_at(Vector2i(7, 3)).broken = true
+	lab.rules.end_turn(0)
+	await wait_process_frames(3)
+	assert_eq(lab.rules.dummies[0].strike_name, "Club Sweep")
+
+
+func test_cave_camera_zooms_out_as_heroes_spread() -> void:
+	lab.set_two_players(true)
+	lab.get_node("%Yard").item_selected.emit(SparringRules.Yard.CAVE)
+	assert_eq(lab.rules.yard, SparringRules.Yard.CAVE)
+	var arena: SparringView = lab.get_node("%Arena")
+	var world: Vector2 = lab.rules.world_size()
+	assert_lt(arena.camera_target().size.y, world.y, "starts at the default zoom on the ground")
+	lab.rules.heroes[0].cell = Vector2i(0, 0)
+	assert_gt(arena.camera_target().size.y, SparringView.DEFAULT_VIEW_HEIGHT + 1.0, "zoomed out to fit both")
+	lab.rules.heroes[0].cell = Vector2i(2, 5)
+	lab.get_node("%WideView").toggled.emit(true)
+	assert_almost_eq(arena.camera_target().size.y, maxf(world.y, world.x * arena.size.y / arena.size.x), 0.01, "wide view shows it all")
+	# Draw a knockback tell and a hanging hero, to catch drawing errors.
+	lab.rules.heroes[1].cell = Vector2i(3, 2)
+	lab.rules.heroes[1].hang_beat = 0
+	lab.rules.end_turn(0)
+	await wait_process_frames(3)
+	assert_eq(lab.rules.dummies[1].strike_name, "Kick")
